@@ -10,11 +10,9 @@ export interface GlobalTradingContext {
   selectedMarket: string
   selectedStrategy: string
   isTrading: boolean
-  sharedWebSocket: any | null
   setSelectedMarket: (market: string) => void
   setSelectedStrategy: (strategy: string) => void
   setIsTrading: (trading: boolean) => void
-  setSharedWebSocket: (ws: any) => void
 }
 
 export function useGlobalTradingContext(): GlobalTradingContext {
@@ -22,7 +20,6 @@ export function useGlobalTradingContext(): GlobalTradingContext {
   const [selectedMarket, setSelectedMarket] = useState("1HZ100V")
   const [selectedStrategy, setSelectedStrategy] = useState("OVER3_UNDER6")
   const [isTrading, setIsTrading] = useState(false)
-  const [sharedWebSocket, setSharedWebSocket] = useState<any>(null)
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -44,10 +41,8 @@ export function useGlobalTradingContext(): GlobalTradingContext {
     selectedMarket,
     selectedStrategy,
     isTrading,
-    sharedWebSocket,
     setSelectedMarket,
     setSelectedStrategy,
     setIsTrading,
-    setSharedWebSocket,
   }
 }

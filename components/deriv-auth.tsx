@@ -1,7 +1,6 @@
 "use client"
 
 import { useDerivAuth } from "@/hooks/use-deriv-auth"
-import { DerivOAuthManager } from "@/components/deriv-oauth-manager"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
@@ -31,13 +30,6 @@ export function DerivAuth({ theme = "dark" }: DerivAuthProps) {
     submitApiToken,
     openTokenSettings,
   } = useDerivAuth()
-
-  const useOAuth = typeof window !== "undefined" && localStorage.getItem("deriv_token")
-
-  // If OAuth token exists, use OAuth manager
-  if (useOAuth) {
-    return <DerivOAuthManager theme={theme} />
-  }
 
   const openDerivAccount = () => {
     window.open("https://app.deriv.com/account", "_blank", "noopener,noreferrer")

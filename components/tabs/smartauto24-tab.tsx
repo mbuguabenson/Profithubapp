@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { Play, Pause } from "lucide-react"
+import { Play, Pause, Zap, AlertCircle, Eye, EyeOff } from "lucide-react"
 import { DerivRealTrader } from "@/lib/deriv-real-trader"
 import { EvenOddStrategy } from "@/lib/even-odd-strategy"
 import { TradingJournal } from "@/lib/trading-journal"
@@ -18,7 +18,6 @@ import { TradingStatsPanel } from "@/components/trading-stats-panel"
 import { TransactionHistory } from "@/components/transaction-history"
 import { TradingJournalPanel } from "@/components/trading-journal-panel"
 import { CleanTradeEngine } from "@/lib/clean-trade-engine"
-import { useGlobalTradingContext } from "@/hooks/use-global-trading-context" // Fixed import path to use hooks directory
 
 interface AnalysisLogEntry {
   timestamp: Date
@@ -40,10 +39,11 @@ interface BotStats {
 
 export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
   const { apiClient, isConnected, isAuthorized } = useDerivAPI()
-  const { balance, isLoggedIn } = useDerivAuth()
-  const globalContext = useGlobalTradingContext()
+  const { balance, isLoggedIn, submitApiToken, token } = useDerivAuth()
 
-  const [tokenConnected, setTokenConnected] = useState(isLoggedIn)
+  const [apiTokenInput, setApiTokenInput] = useState("")
+  const [showToken, setShowToken] = useState(false)
+  const [tokenConnected, setTokenConnected] = useState(!!token)
 
   const [allMarkets, setAllMarkets] = useState<Array<{ symbol: string; display_name: string }>>([])
   const [loadingMarkets, setLoadingMarkets] = useState(true)
@@ -205,12 +205,12 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
   }, [apiClient, isConnected, market])
 
   useEffect(() => {
-    if (globalContext.sharedWebSocket && isLoggedIn) {
-      console.log("[v0] SmartAuto24: Using shared WebSocket from OAuth")
-      // The shared WebSocket is already authorized and connected
-      setTokenConnected(true)
+    const savedToken = localStorage.getItem("deriv_api_token_smartauto24")
+    if (savedToken && !tokenConnected) {
+      setApiTokenInput(savedToken)
+      handleConnectToken(savedToken)
     }
-  }, [globalContext.sharedWebSocket, isLoggedIn])
+  }, [])
 
   const addAnalysisLog = (message: string, type: "info" | "success" | "warning" = "info") => {
     setAnalysisLog((prev) => [
@@ -223,28 +223,26 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
     ])
   }
 
-  // Remove handleConnectToken function, as token management is no longer local
-  // const handleConnectToken = async (tokenToUse?: string) => {
-  //   const tokenValue = tokenToUse || apiTokenInput
-  //   if (!tokenValue) {
-  //     addAnalysisLog("API token cannot be empty.", "warning")
-  //     return
-  //   }
-  //   try {
-  //     await submitApiToken(tokenValue)
-  //     setTokenConnected(true)
-  //     addAnalysisLog("API token connected successfully.", "success")
-  //     localStorage.setItem("deriv_api_token_smartauto24", tokenValue)
-  //   } catch (error) {
-  //     console.error("Failed to connect token:", error)
-  //     addAnalysisLog(`Failed to connect token: ${error}`, "warning")
-  //   }
-  // }
+  const handleConnectToken = async (tokenToUse?: string) => {
+    const tokenValue = tokenToUse || apiTokenInput
+    if (!tokenValue) {
+      addAnalysisLog("API token cannot be empty.", "warning")
+      return
+    }
+    try {
+      await submitApiToken(tokenValue)
+      setTokenConnected(true)
+      addAnalysisLog("API token connected successfully.", "success")
+      localStorage.setItem("deriv_api_token_smartauto24", tokenValue)
+    } catch (error) {
+      console.error("Failed to connect token:", error)
+      addAnalysisLog(`Failed to connect token: ${error}`, "warning")
+    }
+  }
 
   const handleStartAnalysis = async () => {
-    // Check for isLoggedIn instead of isAuthorized and apiClient/isConnected
-    if (!isLoggedIn) {
-      addAnalysisLog("Please log in to start trading.", "warning")
+    if (!isLoggedIn || !apiClient || !isConnected) {
+      addAnalysisLog("Not logged in or API not ready", "warning")
       return
     }
 
@@ -695,21 +693,67 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
 
   return (
     <div className="space-y-4">
-      {!isLoggedIn ? (
+      {!tokenConnected ? (
         <Card
           className={`p-6 border ${
             theme === "dark"
-              ? "bg-gradient-to-r from-yellow-500/20 via-orange-500/20 to-red-500/20 border-yellow-500/30"
-              : "bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-200"
+              ? "bg-gradient-to-r from-red-500/20 via-orange-500/20 to-yellow-500/20 border-red-500/30"
+              : "bg-gradient-to-r from-red-50 to-orange-50 border-red-200"
           }`}
         >
-          <div className="text-center py-8">
-            <h3 className={`text-xl font-bold mb-2 ${theme === "dark" ? "text-yellow-400" : "text-yellow-700"}`}>
-              Please Login with Deriv OAuth
-            </h3>
-            <p className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-              Click the "Login with Deriv" button in the header to get started
-            </p>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <AlertCircle className={`w-6 h-6 ${theme === "dark" ? "text-red-400" : "text-red-600"}`} />
+              <div>
+                <h3 className={`text-lg font-bold ${theme === "dark" ? "text-red-400" : "text-red-700"}`}>
+                  Connect API Token
+                </h3>
+                <p className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                  Enter your Deriv API token to start trading
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="relative">
+              <label
+                className={`block text-sm font-medium mb-2 ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}
+              >
+                API Token
+              </label>
+              <div className="relative">
+                <Input
+                  type={showToken ? "text" : "password"}
+                  value={apiTokenInput}
+                  onChange={(e) => setApiTokenInput(e.target.value)}
+                  placeholder="Paste your Deriv API token here..."
+                  className={`pr-10 ${
+                    theme === "dark"
+                      ? "bg-[#0a0e27]/50 border-yellow-500/30 text-white"
+                      : "bg-white border-gray-300 text-gray-900"
+                  }`}
+                />
+                <button
+                  onClick={() => setShowToken(!showToken)}
+                  className={`absolute right-3 top-1/2 -translate-y-1/2 ${theme === "dark" ? "text-gray-400 hover:text-gray-300" : "text-gray-600 hover:text-gray-900"}`}
+                >
+                  {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <Button
+              onClick={() => handleConnectToken()}
+              className={`w-full ${
+                theme === "dark"
+                  ? "bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-600 hover:to-amber-600 text-black font-bold"
+                  : "bg-yellow-500 hover:bg-yellow-600 text-white font-bold"
+              }`}
+            >
+              <Zap className="w-4 h-4 mr-2" />
+              Connect Token
+            </Button>
           </div>
         </Card>
       ) : (
@@ -1096,7 +1140,6 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
             <div className="flex gap-3">
               <Button
                 onClick={handleStartAnalysis}
-                // Removed tokenConnected check, rely on isLoggedIn
                 disabled={isRunning || !isLoggedIn || loadingMarkets}
                 className={`flex-1 ${
                   theme === "dark"
