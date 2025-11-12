@@ -37,6 +37,17 @@ export function useDerivAuth() {
   useEffect(() => {
     if (typeof window === "undefined") return
 
+    const oauthToken = localStorage.getItem("deriv_token")
+    const oauthLoginid = localStorage.getItem("deriv_loginid")
+
+    if (oauthToken && oauthLoginid) {
+      console.log("[v0] ✅ OAuth token found, using OAuth flow")
+      setToken(oauthToken)
+      connectWithToken(oauthToken)
+      return
+    }
+
+    // Fall back to manual API token
     const storedToken = localStorage.getItem("deriv_api_token")
 
     if (storedToken && storedToken.length > 10) {

@@ -23,7 +23,7 @@ import { LastDigitsLineChart } from "@/components/charts/last-digits-line-chart"
 import { AIAnalysisTab } from "@/components/tabs/ai-analysis-tab"
 import { SuperSignalsTab } from "@/components/tabs/super-signals-tab"
 import { LoadingScreen } from "@/components/loading-screen"
-import { DerivAuth } from "@/components/deriv-auth"
+import { DerivOAuthManager } from "@/components/deriv-oauth-manager"
 import { AutoBotTab } from "@/components/tabs/autobot-tab"
 import { SmartAuto24Tab } from "@/components/tabs/smartauto24-tab"
 import { useGlobalTradingContext } from "@/hooks/use-global-trading-context"
@@ -201,7 +201,14 @@ export default function DerivAnalysisApp() {
                 </a>
               </Button>
 
-              <DerivAuth theme={theme} />
+              <DerivOAuthManager
+                theme={theme}
+                onAuth={(ws, accountInfo) => {
+                  console.log("[v0] OAuth completed:", accountInfo)
+                  // Share WebSocket connection with all trading tabs
+                  globalContext.setSharedWebSocket(ws)
+                }}
+              />
 
               {availableSymbols.length > 0 && (
                 <MarketSelector
