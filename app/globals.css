@@ -1,0 +1,333 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Updated color tokens for soft UI with glowing theme */
+  --background: oklch(0.08 0 0);
+  --foreground: oklch(0.95 0.01 60);
+  --card: oklch(0.12 0.01 200);
+  --card-foreground: oklch(0.95 0.01 60);
+  --popover: oklch(0.12 0.01 200);
+  --popover-foreground: oklch(0.95 0.01 60);
+  --primary: oklch(0.6 0.25 250);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.5 0.2 200);
+  --secondary-foreground: oklch(0.99 0 0);
+  --muted: oklch(0.25 0.05 200);
+  --muted-foreground: oklch(0.65 0.05 200);
+  --accent: oklch(0.65 0.2 280);
+  --accent-foreground: oklch(0.99 0 0);
+  --destructive: oklch(0.6 0.25 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.2 0.05 200);
+  --input: oklch(0.15 0.05 200);
+  --ring: oklch(0.6 0.25 250);
+  --chart-1: oklch(0.65 0.22 280);
+  --chart-2: oklch(0.6 0.18 200);
+  --chart-3: oklch(0.55 0.2 170);
+  --chart-4: oklch(0.7 0.2 40);
+  --chart-5: oklch(0.65 0.18 300);
+  --radius: 0.75rem;
+  --sidebar: oklch(0.1 0.01 200);
+  --sidebar-foreground: oklch(0.95 0.01 60);
+  --sidebar-primary: oklch(0.6 0.25 250);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.65 0.2 280);
+  --sidebar-accent-foreground: oklch(0.99 0 0);
+  --sidebar-border: oklch(0.2 0.05 200);
+  --sidebar-ring: oklch(0.6 0.25 250);
+}
+
+.dark {
+  --background: oklch(0.08 0 0);
+  --foreground: oklch(0.95 0.01 60);
+  --card: oklch(0.12 0.01 200);
+  --card-foreground: oklch(0.95 0.01 60);
+  --popover: oklch(0.12 0.01 200);
+  --popover-foreground: oklch(0.95 0.01 60);
+  --primary: oklch(0.6 0.25 250);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.5 0.2 200);
+  --secondary-foreground: oklch(0.99 0 0);
+  --muted: oklch(0.25 0.05 200);
+  --muted-foreground: oklch(0.65 0.05 200);
+  --accent: oklch(0.65 0.2 280);
+  --accent-foreground: oklch(0.99 0 0);
+  --destructive: oklch(0.6 0.25 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.2 0.05 200);
+  --input: oklch(0.15 0.05 200);
+  --ring: oklch(0.6 0.25 250);
+  --chart-1: oklch(0.65 0.22 280);
+  --chart-2: oklch(0.6 0.18 200);
+  --chart-3: oklch(0.55 0.2 170);
+  --chart-4: oklch(0.7 0.2 40);
+  --chart-5: oklch(0.65 0.18 300);
+  --sidebar: oklch(0.1 0.01 200);
+  --sidebar-foreground: oklch(0.95 0.01 60);
+  --sidebar-primary: oklch(0.6 0.25 250);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.65 0.2 280);
+  --sidebar-accent-foreground: oklch(0.99 0 0);
+  --sidebar-border: oklch(0.2 0.05 200);
+  --sidebar-ring: oklch(0.6 0.25 250);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Added soft UI, glowing animations, and responsive utilities */
+@layer utilities {
+  /* Soft glow effects */
+  .glow-soft-blue {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.3), inset 0 0 20px rgba(59, 130, 246, 0.1);
+  }
+
+  .glow-soft-cyan {
+    box-shadow: 0 0 20px rgba(34, 211, 238, 0.3), inset 0 0 20px rgba(34, 211, 238, 0.1);
+  }
+
+  .glow-soft-purple {
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.3), inset 0 0 20px rgba(168, 85, 247, 0.1);
+  }
+
+  .soft-surface {
+    background: linear-gradient(135deg, rgba(15, 22, 41, 0.4), rgba(26, 35, 53, 0.4));
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(59, 130, 246, 0.15);
+  }
+
+  .soft-card {
+    background: linear-gradient(135deg, rgba(15, 22, 41, 0.6), rgba(26, 35, 53, 0.6));
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 0.75rem;
+  }
+
+  /* Glowing edge animations */
+  .animate-edge-glow {
+    animation: edgeGlowPulse 3s ease-in-out infinite;
+  }
+
+  /* Digit styles */
+  .digit-0 {
+    @apply bg-gradient-to-br from-pink-500 to-pink-600;
+  }
+  .digit-1 {
+    @apply bg-gradient-to-br from-blue-500 to-blue-600;
+  }
+  .digit-2 {
+    @apply bg-gradient-to-br from-cyan-500 to-cyan-600;
+  }
+  .digit-3 {
+    @apply bg-gradient-to-br from-pink-400 to-pink-500;
+  }
+  .digit-4 {
+    @apply bg-gradient-to-br from-cyan-400 to-cyan-500;
+  }
+  .digit-5 {
+    @apply bg-gradient-to-br from-blue-400 to-blue-500;
+  }
+  .digit-6 {
+    @apply bg-gradient-to-br from-red-500 to-red-600;
+  }
+  .digit-7 {
+    @apply bg-gradient-to-br from-pink-500 to-pink-600;
+  }
+  .digit-8 {
+    @apply bg-gradient-to-br from-orange-500 to-orange-600;
+  }
+  .digit-9 {
+    @apply bg-gradient-to-br from-blue-500 to-purple-600;
+  }
+
+  /* Responsive text sizing */
+  .text-responsive-sm {
+    @apply text-xs sm:text-sm md:text-base;
+  }
+  .text-responsive-base {
+    @apply text-sm sm:text-base md:text-lg;
+  }
+  .text-responsive-lg {
+    @apply text-base sm:text-lg md:text-xl;
+  }
+  .text-responsive-xl {
+    @apply text-lg sm:text-xl md:text-2xl;
+  }
+  .text-responsive-2xl {
+    @apply text-xl sm:text-2xl md:text-3xl;
+  }
+
+  /* Responsive padding */
+  .p-responsive {
+    @apply p-2 sm:p-3 md:p-4;
+  }
+  .px-responsive {
+    @apply px-2 sm:px-3 md:px-4;
+  }
+  .py-responsive {
+    @apply py-2 sm:py-3 md:py-4;
+  }
+
+  /* Responsive gap */
+  .gap-responsive {
+    @apply gap-2 sm:gap-3 md:gap-4;
+  }
+}
+
+@keyframes edgeGlowPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 30px rgba(59, 130, 246, 0.3), inset 0 0 30px rgba(59, 130, 246, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 50px rgba(34, 211, 238, 0.4), inset 0 0 30px rgba(34, 211, 238, 0.15);
+  }
+}
+
+@keyframes glowBlue {
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.3), 0 0 40px rgba(59, 130, 246, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(59, 130, 246, 0.5), 0 0 60px rgba(59, 130, 246, 0.25);
+  }
+}
+
+@keyframes foxRun {
+  0% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(10px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes liquidFill {
+  0% {
+    height: 0%;
+  }
+  100% {
+    height: 100%;
+  }
+}
+
+/* Add card-specific glowing animations */
+@keyframes cardGlowPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.2), inset 0 0 15px rgba(59, 130, 246, 0.05);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(34, 211, 238, 0.3), inset 0 0 25px rgba(34, 211, 238, 0.1);
+  }
+}
+
+@keyframes borderGlowPulse {
+  0%,
+  100% {
+    border-color: rgba(59, 130, 246, 0.3);
+  }
+  50% {
+    border-color: rgba(34, 211, 238, 0.6);
+  }
+}
+
+@layer utilities {
+  .animate-glow-blue {
+    animation: glowBlue 2s ease-in-out infinite;
+  }
+
+  .animate-fox-run {
+    animation: foxRun 2s ease-in-out infinite;
+  }
+
+  .animate-liquid-fill {
+    animation: liquidFill 3s ease-in-out forwards;
+  }
+
+  .glass-light {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(209, 213, 219, 0.3);
+  }
+
+  .frost-light {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.6));
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+  }
+
+  .card-glow-animate {
+    animation: cardGlowPulse 3s ease-in-out infinite;
+  }
+
+  .border-glow-animate {
+    animation: borderGlowPulse 2s ease-in-out infinite;
+  }
+
+  /* Fixed circular reference - replaced @apply with direct CSS properties */
+  .glow-card {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(34, 211, 238, 0.1));
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 0.75rem;
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.2), inset 0 0 15px rgba(59, 130, 246, 0.05);
+  }
+
+  .glow-card-active {
+    animation: cardGlowPulse 3s ease-in-out infinite;
+  }
+}
