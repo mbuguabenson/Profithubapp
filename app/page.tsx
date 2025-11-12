@@ -33,6 +33,7 @@ import { ResponsiveTabs } from "@/components/responsive-tabs"
 import { MoneyMakerTab } from "@/components/tabs/money-maker-tab"
 import { TradeNowTab } from "@/components/tabs/trade-now-tab"
 import { ToolsInfoTab } from "@/components/tabs/tools-info-tab"
+import { StrategiesTab } from "@/components/tabs/strategies-tab"
 
 export default function DerivAnalysisApp() {
   const [theme, setTheme] = useState<"light" | "dark">("dark")
@@ -331,6 +332,7 @@ export default function DerivAnalysisApp() {
               "trading-view",
               "trade-now",
               "smartauto24",
+              "strategies",
               "tools-info",
             ].map((tab) => (
               <TabsTrigger
@@ -345,7 +347,9 @@ export default function DerivAnalysisApp() {
                         ? "data-[state=active]:border-purple-500 data-[state=active]:text-purple-500 data-[state=active]:shadow-[0_2px_10px_rgba(168,85,247,0.3)]"
                         : tab === "trade-now"
                           ? "data-[state=active]:border-green-500 data-[state=active]:text-green-500 data-[state=active]:shadow-[0_2px_10px_rgba(34,197,94,0.3)]"
-                          : "data-[state=active]:border-green-400 data-[state=active]:text-green-400 data-[state=active]:shadow-[0_2px_10px_rgba(34,211,238,0.3)]"
+                          : tab === "strategies"
+                            ? "data-[state=active]:border-cyan-500 data-[state=active]:text-cyan-500 data-[state=active]:shadow-[0_2px_10px_rgba(34,211,238,0.3)]"
+                            : "data-[state=active]:border-green-400 data-[state=active]:text-green-400 data-[state=active]:shadow-[0_2px_10px_rgba(34,211,238,0.3)]"
                 } data-[state=active]:bg-transparent ${theme === "dark" ? "text-gray-400 hover:text-white" : "text-gray-600 hover:text-gray-900"}`}
               >
                 {tab === "smart-analysis"
@@ -378,9 +382,11 @@ export default function DerivAnalysisApp() {
                                             ? "Trade Now 🚀"
                                             : tab === "smartauto24"
                                               ? "SmartAuto24 ⭐"
-                                              : tab === "tools-info"
-                                                ? "Tools & Info 🛠️"
-                                                : tab.replace(/-/g, " ")}
+                                              : tab === "strategies"
+                                                ? "Strategies 🎯"
+                                                : tab === "tools-info"
+                                                  ? "Tools & Info 🛠️"
+                                                  : tab.replace(/-/g, " ")}
               </TabsTrigger>
             ))}
           </ResponsiveTabs>
@@ -667,6 +673,10 @@ export default function DerivAnalysisApp() {
 
               <TabsContent value="smartauto24" className="mt-0">
                 <SmartAuto24Tab theme={theme} />
+              </TabsContent>
+
+              <TabsContent value="strategies" className="mt-0">
+                <StrategiesTab theme={theme} />
               </TabsContent>
 
               <TabsContent value="tools-info" className="mt-0">
