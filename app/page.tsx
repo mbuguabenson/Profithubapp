@@ -152,33 +152,33 @@ export default function DerivAnalysisApp() {
       <header
         className={`border-b ${theme === "dark" ? "border-blue-500/20 bg-[#0a0e27]/80" : "border-gray-200 bg-white/80"} backdrop-blur-md sticky top-0 z-50 glow-soft-blue`}
       >
-        <div className="w-full px-2 sm:px-3 md:px-4 py-2 sm:py-3 md:py-4">
-          <div className="flex items-center justify-between gap-2 sm:gap-3 md:gap-4 flex-wrap">
-            <div className="flex items-center gap-1 sm:gap-2 md:gap-4 min-w-0">
+        <div className="w-full px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-3">
+          <div className="flex items-center justify-between gap-1.5 sm:gap-2 md:gap-3 flex-wrap">
+            <div className="flex items-center gap-1 sm:gap-2 md:gap-3 min-w-0">
               <Button
                 variant="ghost"
                 size="icon"
-                className={`flex-shrink-0 ${
+                className={`flex-shrink-0 h-7 w-7 sm:h-9 sm:w-9 ${
                   theme === "dark"
                     ? "text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
                     : "text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                 }`}
               >
-                <Home className="h-4 w-4 sm:h-5 sm:w-5" />
+                <Home className="h-3 w-3 sm:h-4 sm:w-4" />
               </Button>
               <h1
-                className={`text-base sm:text-lg md:text-2xl font-bold truncate ${theme === "dark" ? "bg-gradient-to-r from-green-400 via-emerald-400 to-teal-400 bg-clip-text text-transparent animate-pulse" : "text-gray-900"}`}
+                className={`text-sm sm:text-lg md:text-xl font-bold truncate ${theme === "dark" ? "bg-gradient-to-r from-green-400 via-emerald-400 to-teal-400 bg-clip-text text-transparent animate-pulse" : "text-gray-900"}`}
               >
                 💰 Profit Hub
               </h1>
             </div>
 
-            <div className="flex items-center gap-1 sm:gap-2 md:gap-3 flex-wrap justify-end">
+            <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 flex-wrap justify-end">
               <Button
                 asChild
-                className={`text-sm sm:text-base px-3 sm:px-4 py-2 sm:py-3 font-bold ${
+                className={`text-xs sm:text-sm px-2 sm:px-3 py-1.5 sm:py-2 font-bold h-7 sm:h-9 ${
                   theme === "dark"
-                    ? "bg-gradient-to-r from-red-500 via-red-600 to-red-700 hover:from-red-600 hover:via-red-700 hover:to-red-800 text-white shadow-[0_0_25px_rgba(239,68,68,0.6)] hover:shadow-[0_0_35px_rgba(239,68,68,0.8)] animate-pulse"
+                    ? "bg-gradient-to-r from-red-500 via-red-600 to-red-700 hover:from-red-600 hover:via-red-700 hover:to-red-800 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)]"
                     : "bg-gradient-to-r from-red-500 via-red-600 to-red-700 hover:from-red-600 hover:via-red-700 hover:to-red-800 text-white shadow-lg"
                 }`}
                 title="Open Deriv Account"
@@ -187,18 +187,19 @@ export default function DerivAnalysisApp() {
                   href="https://track.deriv.com/_1mHiO0UpCX6NhxmBqQyZL2Nd7ZgqdRLk/1/"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-1"
                 >
                   <svg
-                    width="24"
-                    height="24"
+                    width="16"
+                    height="16"
                     viewBox="0 0 24 24"
                     fill="currentColor"
                     xmlns="http://www.w3.org/2000/svg"
+                    className="sm:w-5 sm:h-5"
                   >
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z" />
                   </svg>
-                  <span className="hidden sm:inline">Deriv</span>
+                  <span className="hidden sm:inline text-xs sm:text-sm">Deriv</span>
                 </a>
               </Button>
 
@@ -213,11 +214,15 @@ export default function DerivAnalysisApp() {
                 />
               )}
 
-              <div className="flex items-center gap-1 text-xs sm:text-sm">
-                <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Ticks:</span>
+              <div className="flex items-center gap-0.5 text-xs">
+                <span
+                  className={theme === "dark" ? "text-gray-400 hidden sm:inline" : "text-gray-600 hidden sm:inline"}
+                >
+                  Ticks:
+                </span>
                 <Select value={maxTicks.toString()} onValueChange={(v) => changeMaxTicks(Number.parseInt(v))}>
                   <SelectTrigger
-                    className={`w-20 sm:w-24 md:w-28 text-xs sm:text-sm ${theme === "dark" ? "bg-[#0f1629]/50 border-blue-500/30 text-white hover:bg-[#1a2235]" : "bg-white border-gray-300 text-gray-900"}`}
+                    className={`w-16 sm:w-20 h-7 sm:h-9 text-xs ${theme === "dark" ? "bg-[#0f1629]/50 border-blue-500/30 text-white hover:bg-[#1a2235]" : "bg-white border-gray-300 text-gray-900"}`}
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -241,56 +246,63 @@ export default function DerivAnalysisApp() {
                 variant="ghost"
                 size="icon"
                 onClick={toggleTheme}
-                className={`flex-shrink-0 ${
+                className={`flex-shrink-0 h-7 w-7 sm:h-9 sm:w-9 ${
                   theme === "light"
                     ? "text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
                     : "text-gray-700 hover:text-gray-900 hover:bg-gray-100"
                 }`}
               >
                 {theme === "light" ? (
-                  <Moon className="h-4 w-4 sm:h-5 sm:w-5" />
+                  <Moon className="h-3 w-3 sm:h-4 sm:w-4" />
                 ) : (
-                  <Sun className="h-4 w-4 sm:h-5 sm:w-5" />
+                  <Sun className="h-3 w-3 sm:h-4 sm:w-4" />
                 )}
               </Button>
 
               <div
-                className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 rounded-lg border text-xs sm:text-sm glow-soft-cyan ${theme === "dark" ? "bg-gradient-to-r from-blue-500/20 to-cyan-500/20 border-blue-500/30 shadow-[0_0_10px_rgba(34,197,94,0.3)]" : "bg-gradient-to-r from-blue-50 to-cyan-50 border-blue-200"}`}
+                className={`flex items-center gap-1 px-1.5 sm:px-2 py-1 rounded text-xs ${theme === "dark" ? "bg-gradient-to-r from-blue-500/20 to-cyan-500/20 border-blue-500/30" : "bg-gradient-to-r from-blue-50 to-cyan-50 border-blue-200"} border`}
               >
-                <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Price:</span>
-                <span className={`font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                <span className={`${theme === "dark" ? "text-gray-400" : "text-gray-600"} hidden sm:inline`}>
+                  Price:
+                </span>
+                <span className={`font-bold text-xs ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
                   {currentPrice?.toFixed(5) || "---"}
                 </span>
               </div>
 
               <div
-                className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 rounded-lg border text-xs sm:text-sm glow-soft-blue ${theme === "dark" ? "bg-gradient-to-r from-orange-500/20 to-red-500/20 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.3)]" : "bg-gradient-to-r from-orange-50 to-red-50 border-orange-200"}`}
+                className={`flex items-center gap-1 px-1.5 sm:px-2 py-1 rounded text-xs ${theme === "dark" ? "bg-gradient-to-r from-orange-500/20 to-red-500/20 border-orange-500/30" : "bg-gradient-to-r from-orange-50 to-red-50 border-orange-200"} border`}
               >
-                <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Digit:</span>
-                <span className={`font-bold ${theme === "dark" ? "text-orange-400" : "text-orange-600"}`}>
+                <span className={`${theme === "dark" ? "text-gray-400" : "text-gray-600"} hidden sm:inline`}>
+                  Digit:
+                </span>
+                <span className={`font-bold text-xs ${theme === "dark" ? "text-orange-400" : "text-orange-600"}`}>
                   {currentDigit !== null ? currentDigit : "0"}
                 </span>
               </div>
 
               {connectionStatus === "connected" ? (
                 <Badge
-                  className={`text-xs ${theme === "dark" ? "bg-green-500/20 text-green-400 border-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.3)]" : "bg-green-100 text-green-700 border-green-300"}`}
+                  className={`text-xs h-6 sm:h-7 ${theme === "dark" ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-green-100 text-green-700 border-green-300"}`}
                 >
-                  Connected
+                  <span className="hidden sm:inline">Connected</span>
+                  <span className="sm:hidden">●</span>
                 </Badge>
               ) : connectionStatus === "reconnecting" ? (
                 <Badge
                   variant="outline"
-                  className={`text-xs animate-pulse ${theme === "dark" ? "border-yellow-500 text-yellow-400 bg-yellow-500/10" : "border-yellow-400 text-yellow-600 bg-yellow-50"}`}
+                  className={`text-xs h-6 sm:h-7 animate-pulse ${theme === "dark" ? "border-yellow-500 text-yellow-400 bg-yellow-500/10" : "border-yellow-400 text-yellow-600 bg-yellow-50"}`}
                 >
-                  Connecting...
+                  <span className="hidden sm:inline">Connecting...</span>
+                  <span className="sm:hidden">...</span>
                 </Badge>
               ) : (
                 <Badge
                   variant="outline"
-                  className={`text-xs ${theme === "dark" ? "border-red-500 text-red-400 bg-red-500/10" : "border-red-400 text-red-600 bg-red-50"}`}
+                  className={`text-xs h-6 sm:h-7 ${theme === "dark" ? "border-red-500 text-red-400 bg-red-500/10" : "border-red-400 text-red-600 bg-red-50"}`}
                 >
-                  Disconnected
+                  <span className="hidden sm:inline">Disconnected</span>
+                  <span className="sm:hidden">✕</span>
                 </Badge>
               )}
             </div>

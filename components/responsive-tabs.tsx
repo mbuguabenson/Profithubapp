@@ -1,7 +1,6 @@
 "use client"
 
 import React from "react"
-import { useState } from "react"
 import { TabsList } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { ChevronDown } from "lucide-react"
@@ -13,55 +12,82 @@ interface ResponsiveTabsProps {
 }
 
 export function ResponsiveTabs({ children, theme = "dark" }: ResponsiveTabsProps) {
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
-  const [selectedTab, setSelectedTab] = useState<string>("smart-analysis")
+  const [isDropdownOpen, setIsDropdownOpen] = React.useState(false)
+  const [selectedTab, setSelectedTab] = React.useState<string>("smart-analysis")
+
+  React.useEffect(() => {
+    const updateActiveTab = () => {
+      const activeTrigger = document.querySelector('[role="tab"][data-state="active"]')
+      if (activeTrigger) {
+        const tabValue = activeTrigger.getAttribute("value")
+        if (tabValue && tabValue !== selectedTab) {
+          setSelectedTab(tabValue)
+        }
+      }
+    }
+
+    // Initial check
+    updateActiveTab()
+
+    // Listen for tab changes
+    const observer = new MutationObserver(updateActiveTab)
+    const tabsList = document.querySelector('[role="tablist"]')
+    if (tabsList) {
+      observer.observe(tabsList, {
+        attributes: true,
+        subtree: true,
+        attributeFilter: ["data-state"],
+      })
+    }
+
+    return () => observer.disconnect()
+  }, [selectedTab])
 
   const handleTabClick = (tabValue: string) => {
+    console.log("[v0] Dropdown tab selected:", tabValue)
     setSelectedTab(tabValue)
     setIsDropdownOpen(false)
-    // Trigger the tab change by dispatching a click event on the actual tab trigger
-    const tabTrigger = document.querySelector(`[value="${tabValue}"]`)
+
+    // Find and click the actual tab trigger to properly activate it
+    const tabTrigger = document.querySelector(`[role="tab"][value="${tabValue}"]`) as HTMLElement
     if (tabTrigger) {
-      ;(tabTrigger as HTMLElement).click()
+      console.log("[v0] Clicking tab trigger for:", tabValue)
+      tabTrigger.click()
+    } else {
+      console.error("[v0] Tab trigger not found for:", tabValue)
     }
   }
 
   const getTabLabel = (value: string) => {
-    let label = value.replace(/-/g, " ")
     const child = React.Children.toArray(children).find((c) => React.isValidElement(c) && c.props.value === value)
     if (React.isValidElement(child)) {
-      const childLabel = child.props.children
-      if (typeof childLabel === "string") {
-        label = childLabel
-      }
+      return child.props.children || value.replace(/-/g, " ")
     }
-    return label
+    return value.replace(/-/g, " ")
   }
 
-  // On mobile (sm and below), show dropdown. On larger screens, show horizontal tabs
   return (
     <>
       {/* Mobile Dropdown View */}
-      <div className="sm:hidden px-2 py-3">
+      <div className="sm:hidden px-2 py-2">
         <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
           <DropdownMenuTrigger asChild>
             <Button
               variant="outline"
-              className={`w-full flex items-center justify-between text-sm font-medium h-11 ${
+              className={`w-full flex items-center justify-between text-xs font-medium h-9 ${
                 theme === "dark"
                   ? "bg-[#0f1629]/80 border-green-500/30 text-white hover:bg-[#1a2235]"
                   : "bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
               }`}
             >
               <span className="capitalize truncate">{getTabLabel(selectedTab)}</span>
-              <ChevronDown className="h-4 w-4 ml-2 flex-shrink-0" />
+              <ChevronDown className="h-3 w-3 ml-2 flex-shrink-0" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="center"
             className={`w-[calc(100vw-2rem)] max-h-[60vh] overflow-y-auto ${theme === "dark" ? "bg-[#0a0e27] border-green-500/30" : "bg-white border-gray-300"}`}
           >
-            {/* Render tab triggers as dropdown items */}
             {React.Children.map(children, (child) => {
               if (React.isValidElement(child)) {
                 const tabValue = child.props.value
@@ -70,7 +96,7 @@ export function ResponsiveTabs({ children, theme = "dark" }: ResponsiveTabsProps
                   <DropdownMenuItem
                     key={tabValue}
                     onClick={() => handleTabClick(tabValue)}
-                    className={`cursor-pointer py-3 ${
+                    className={`cursor-pointer py-2.5 text-xs ${
                       selectedTab === tabValue
                         ? theme === "dark"
                           ? "bg-green-500/20 text-green-400"
