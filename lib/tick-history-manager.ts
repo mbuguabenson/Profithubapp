@@ -18,12 +18,16 @@ export class TickHistoryManager {
         const response = await this.apiClient.getTickHistory(symbol, count)
 
         const latestDigits = response.prices.map((price: number) => {
-          const priceStr = price.toFixed(5)
-          return Number.parseInt(priceStr[priceStr.length - 1])
+          const priceStr = price.toString()
+          const cleanStr = priceStr.replace(".", "")
+          const lastChar = cleanStr[cleanStr.length - 1]
+          return Number.parseInt(lastChar)
         })
 
         this.tickBuffers.set(symbol, latestDigits)
-        console.log(`[v0] Loaded ${latestDigits.length} ticks for ${symbol}`)
+        console.log(
+          `[v0] Loaded ${latestDigits.length} ticks for ${symbol}, first few: ${latestDigits.slice(0, 5).join(", ")}`,
+        )
 
         // Wait 1.5 seconds between requests to avoid rate limiting
         await new Promise((r) => setTimeout(r, 1500))
@@ -58,7 +62,13 @@ export class TickHistoryManager {
 
   private handleTickUpdate(symbol: string, price: number): void {
     const buffer = this.tickBuffers.get(symbol) || []
-    const lastDigit = Number.parseInt(price.toFixed(5).slice(-1))
+
+    const priceStr = price.toString()
+    const cleanStr = priceStr.replace(".", "")
+    const lastChar = cleanStr[cleanStr.length - 1]
+    const lastDigit = Number.parseInt(lastChar)
+
+    console.log(`[v0] ${symbol} tick: ${price} → last digit: ${lastDigit}`)
 
     buffer.push(lastDigit)
 

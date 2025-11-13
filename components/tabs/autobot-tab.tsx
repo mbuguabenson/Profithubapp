@@ -325,11 +325,19 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
   }
 
   const handleStartBot = async (strategy: BotStrategy) => {
-    if (activeBots.has(strategy)) return
+    const isAlreadyRunning = activeBots.has(strategy)
+    if (isAlreadyRunning) {
+      console.log(`[v0] ${strategy} bot is already running`)
+      return
+    }
 
     try {
       if (!apiClient || !isConnected || !isAuthorized) {
-        console.error("[v0] Cannot start bot - API not ready")
+        console.error("[v0] Cannot start bot - API not ready:", {
+          hasClient: !!apiClient,
+          isConnected,
+          isAuthorized,
+        })
         return
       }
 
@@ -363,9 +371,21 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
 
       console.log(`[v0] Starting ${strategy} bot with config:`, autoBotConfig)
 
+      setBotStates((prev) =>
+        new Map(prev).set(strategy, {
+          wins: 0,
+          losses: 0,
+          profitLoss: 0,
+          isAnalyzing: true,
+          isTrading: false,
+          lastTrade: null,
+        }),
+      )
+
       const newBot = new AutoBot(apiClient, strategy, autoBotConfig)
 
       await newBot.start((state) => {
+        console.log(`[v0] ${strategy} bot state updated:`, state)
         setBotStates((prev) => new Map(prev).set(strategy, state))
 
         if (state.lastTrade) {
@@ -739,7 +759,10 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                   </Button>
                 ) : (
                   <Button
-                    onClick={() => handleStartBot(strategy.id)}
+                    onClick={() => {
+                      console.log(`[v0] Start button clicked for ${strategy.id}`)
+                      handleStartBot(strategy.id)
+                    }}
                     className={`w-full gap-2 ${
                       isReady ? "bg-green-500 hover:bg-green-600 animate-pulse" : "bg-blue-500 hover:bg-blue-600"
                     }`}
@@ -747,7 +770,7 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                     size="sm"
                   >
                     <Play className="w-4 h-4" />
-                    {tickData.length < 25 ? "Loading Data..." : isReady ? "Start Trading" : "Start"}
+                    {tickData.length < 25 ? `Loading... (${tickData.length}/25)` : isReady ? "Start Trading" : "Start"}
                   </Button>
                 )}
               </CardContent>
