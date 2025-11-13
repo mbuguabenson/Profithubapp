@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Progress } from "@/components/ui/progress"
-import { Play, Square, TrendingUp, TrendingDown, AlertCircle, Loader, AlertTriangle } from "lucide-react"
+import { Play, Square, AlertCircle, AlertTriangle, Activity } from "lucide-react"
 import { useDerivAPI } from "@/lib/deriv-api-context"
 import { useDerivAuth } from "@/hooks/use-deriv-auth"
 import { AutoBot, type BotStrategy, type AutoBotState, type AutoBotConfig } from "@/lib/autobots"
@@ -18,67 +18,58 @@ interface AutoBotTabProps {
   symbol: string
 }
 
-const BOT_STRATEGIES: { id: BotStrategy; name: string; description: string }[] = [
+const BOT_STRATEGIES: {
+  id: BotStrategy
+  name: string
+  description: string
+  condition: string
+}[] = [
   {
     id: "EVEN_ODD",
     name: "EVEN/ODD Bot",
-    description:
-      "Analyzes Even/Odd digit bias. Shows WAIT at 50%+ increasing, TRADE NOW at 56%+. Uses last 1 hour data to detect market direction (55%+ and increasing)",
+    description: "Analyzes Even/Odd digit bias over last 50 ticks",
+    condition: "Entry: When even/odd reaches 56%+ and increasing. Wait at 50-56%. Exit after 5 ticks.",
   },
   {
     id: "OVER3_UNDER6",
     name: "OVER3/UNDER6 Bot",
-    description:
-      "Analyzes Over 3 (digits 4-9) and Under 6 (digits 0-5). WAIT at 53%+, TRADE NOW at 56%+, STRONG at 60%. Entry when 55%+ and increasing",
+    description: "Trades Over 3 (4-9) vs Under 6 (0-5)",
+    condition: "Entry: 60%+ = STRONG signal. 56-60% = TRADE NOW. 53-56% = WAIT. Exit after 5 ticks.",
   },
   {
     id: "OVER2_UNDER7",
     name: "OVER2/UNDER7 Bot",
-    description:
-      "Analyzes Over 2 (digits 3-9) and Under 7 (digits 0-6). Predicts next 10-20 ticks. When 0-6 most: Under 7-8, when 0-5: Under 7, when 0-4: Under 6",
+    description: "Trades Over 2 (3-9) vs Under 7 (0-6)",
+    condition: "Entry: When 0-6 dominates 60%+, trade Under 7. When 3-9 dominates, trade Over 2.",
   },
   {
     id: "OVER1_UNDER8",
     name: "OVER1/UNDER8 Bot",
-    description:
-      "Advanced bot for Over 1 (digits 2-9) and Under 8 (digits 0-7). When 0-6: Over 1+2, when 4-9: Over 2, when 5-9: Over 3. Analyzes power dynamics",
+    description: "Advanced Over 1 (2-9) vs Under 8 (0-7)",
+    condition: "Entry: Analyzes last 25 ticks. 60%+ threshold. Exit after 5 ticks.",
   },
   {
     id: "UNDER6",
     name: "UNDER6 Bot",
-    description:
-      "Specialized for digits 0-6. When 0-4 appears most (50%+), gives Under 6 signal. Requires predictable patterns",
+    description: "Specialized for digits 0-6",
+    condition: "Entry: When 0-4 appears 50%+, trade Under 6. Wait for predictable patterns.",
   },
   {
     id: "DIFFERS",
     name: "DIFFERS Bot",
-    description:
-      "Selects digits 2-7 with <10% power (not most/least appearing). Waits 3 ticks without digit appearance, then trades. High precision strategy",
-  },
-  {
-    id: "EVEN_ODD_ADVANCED",
-    name: "EVEN/ODD Advanced",
-    description:
-      "Advanced volatility detection. WAIT (blue) at 50%+ increasing, TRADE NOW (green) at 56%+ until market changes. Multi-level signal analysis",
-  },
-  {
-    id: "OVER_UNDER_ADVANCED",
-    name: "OVER/UNDER Advanced",
-    description:
-      "Multi-level: 53%=WAIT (blue), 56%+=TRADE NOW (green), 60%+=STRONG signal. Uses last 10-20 ticks for predictability",
+    description: "Selects digits 2-7 with <10% frequency",
+    condition: "Entry: Wait 3 ticks without digit appearance, then trade. High precision strategy.",
   },
 ]
 
 export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
   const { apiClient, isConnected, isAuthorized, error: apiError } = useDerivAPI()
   const { accountInfo } = useDerivAuth()
-  const [selectedStrategy, setSelectedStrategy] = useState<BotStrategy>("EVEN_ODD")
-  const [bot, setBot] = useState<AutoBot | null>(null)
-  const [botState, setBotState] = useState<AutoBotState | null>(null)
-  const [analysisData, setAnalysisData] = useState<any>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [localError, setLocalError] = useState<string | null>(null)
-  const [emergencyStop, setEmergencyStop] = useState(false)
+
+  const [activeBots, setActiveBots] = useState<Map<BotStrategy, AutoBot>>(new Map())
+  const [botStates, setBotStates] = useState<Map<BotStrategy, AutoBotState>>(new Map())
+  const [botAnalysis, setBotAnalysis] = useState<Map<BotStrategy, any>>(new Map())
+  const [botReadyStatus, setBotReadyStatus] = useState<Map<BotStrategy, boolean>>(new Map())
 
   const [config, setConfig] = useState<AutoBotConfig>({
     symbol: symbol,
@@ -106,146 +97,245 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
   }, [accountInfo])
 
   useEffect(() => {
-    if (emergencyStop && bot) {
-      console.log("[v0] EMERGENCY STOP ACTIVATED")
-      bot.stop()
-      setBot(null)
-      setBotState(null)
-      setEmergencyStop(false)
-    }
-  }, [emergencyStop, bot])
+    if (!apiClient || !isConnected) return
 
-  const handleStart = async () => {
-    setLocalError(null)
-    setIsLoading(true)
+    const analyzeInterval = setInterval(async () => {
+      for (const strategy of BOT_STRATEGIES) {
+        try {
+          // Fetch tick history for analysis (e.g., last 50 ticks)
+          const response = await apiClient.getTickHistory(symbol, 50)
+          const latestDigits = response.prices.map((price: number) => {
+            const priceStr = price.toFixed(5)
+            return Number.parseInt(priceStr[priceStr.length - 1])
+          })
+
+          const analysis = analyzeStrategy(strategy.id, latestDigits)
+          setBotAnalysis((prev) => new Map(prev).set(strategy.id, analysis))
+
+          // Check if conditions are met for READY status
+          // This is a simplified example, adjust conditions based on bot strategy
+          const isReady = analysis.marketPower >= 56 && analysis.trend === "increasing"
+          setBotReadyStatus((prev) => new Map(prev).set(strategy.id, isReady))
+        } catch (error) {
+          console.error(`[v0] Analysis error for ${strategy.id}:`, error)
+        }
+      }
+    }, 2000) // Update every 2 seconds
+
+    return () => clearInterval(analyzeInterval)
+  }, [apiClient, isConnected, symbol])
+
+  const analyzeStrategy = (strategy: BotStrategy, digits: number[]) => {
+    if (digits.length < 25) {
+      // Ensure enough data for meaningful analysis
+      return { marketPower: 0, trend: "neutral", signal: "WAIT", entryPoint: null, exitPoint: null }
+    }
+
+    const last10 = digits.slice(-10) // For trend analysis
+    const last50 = digits // For overall distribution
+
+    switch (strategy) {
+      case "EVEN_ODD": {
+        const evenCount = last50.filter((d) => d % 2 === 0).length
+        const evenPercent = (evenCount / last50.length) * 100
+        const oddPercent = 100 - evenPercent
+        const maxPercent = Math.max(evenPercent, oddPercent)
+
+        // Trend analysis based on last 10 digits' evenness compared to overall
+        const evenLast10 = last10.filter((d) => d % 2 === 0).length
+        const evenPercentLast10 = (evenLast10 / 10) * 100
+        const trend = evenPercentLast10 > evenPercent ? "increasing" : "decreasing"
+
+        return {
+          marketPower: maxPercent,
+          trend,
+          signal: maxPercent >= 56 && trend === "increasing" ? "TRADE NOW" : maxPercent >= 50 ? "WAIT" : "NEUTRAL",
+          entryPoint: evenPercent > oddPercent ? "EVEN" : "ODD",
+          exitPoint: "After 5 ticks",
+          distribution: { even: evenPercent.toFixed(1), odd: oddPercent.toFixed(1) },
+        }
+      }
+
+      case "OVER3_UNDER6": {
+        const overCount = last50.filter((d) => d >= 4).length // Digits 4, 5, 6, 7, 8, 9
+        const underCount = last50.filter((d) => d <= 5).length // Digits 0, 1, 2, 3, 4, 5
+        const overPercent = (overCount / last50.length) * 100
+        const underPercent = (underCount / last50.length) * 100
+        const maxPercent = Math.max(overPercent, underPercent)
+
+        return {
+          marketPower: maxPercent,
+          trend: maxPercent >= 60 ? "strong" : maxPercent >= 56 ? "increasing" : "neutral", // Simplified trend
+          signal: maxPercent >= 60 ? "STRONG" : maxPercent >= 56 ? "TRADE NOW" : maxPercent >= 53 ? "WAIT" : "NEUTRAL",
+          entryPoint: overPercent > underPercent ? "OVER 3" : "UNDER 6",
+          exitPoint: "After 5 ticks",
+          distribution: { over: overPercent.toFixed(1), under: underPercent.toFixed(1) },
+        }
+      }
+
+      case "OVER2_UNDER7": {
+        const overCount = last50.filter((d) => d >= 3).length // Digits 3, 4, 5, 6, 7, 8, 9
+        const underCount = last50.filter((d) => d <= 6).length // Digits 0, 1, 2, 3, 4, 5, 6
+        const overPercent = (overCount / last50.length) * 100
+        const underPercent = (underCount / last50.length) * 100
+        const maxPercent = Math.max(overPercent, underPercent)
+
+        return {
+          marketPower: maxPercent,
+          trend: maxPercent >= 60 ? "strong" : "neutral", // Simplified trend
+          signal: maxPercent >= 60 ? "TRADE NOW" : maxPercent >= 56 ? "WAIT" : "NEUTRAL",
+          entryPoint: overPercent > underPercent ? "OVER 2" : "UNDER 7",
+          exitPoint: "After 5 ticks",
+          distribution: { over: overPercent.toFixed(1), under: underPercent.toFixed(1) },
+        }
+      }
+
+      case "OVER1_UNDER8": {
+        const overCount = last50.filter((d) => d >= 2).length // Digits 2-9
+        const underCount = last50.filter((d) => d <= 7).length // Digits 0-7
+        const overPercent = (overCount / last50.length) * 100
+        const underPercent = (underCount / last50.length) * 100
+        const maxPercent = Math.max(overPercent, underPercent)
+
+        return {
+          marketPower: maxPercent,
+          trend: maxPercent >= 60 ? "strong" : "neutral", // Simplified trend
+          signal: maxPercent >= 60 ? "TRADE NOW" : "NEUTRAL",
+          entryPoint: overPercent > underPercent ? "OVER 1" : "UNDER 8",
+          exitPoint: "After 5 ticks",
+          distribution: { over: overPercent.toFixed(1), under: underPercent.toFixed(1) },
+        }
+      }
+
+      case "UNDER6": {
+        const under4Count = last50.filter((d) => d <= 4).length // Digits 0, 1, 2, 3, 4
+        const under4Percent = (under4Count / last50.length) * 100
+
+        return {
+          marketPower: under4Percent,
+          trend: under4Percent >= 50 ? "strong" : "neutral", // Simplified trend
+          signal: under4Percent >= 50 ? "TRADE NOW" : "WAIT",
+          entryPoint: "UNDER 6",
+          exitPoint: "After 5 ticks",
+          distribution: { under4: under4Percent.toFixed(1) },
+        }
+      }
+
+      case "DIFFERS": {
+        // Count frequency of digits 2 through 7
+        const frequency: Record<number, number> = {}
+        for (let i = 2; i <= 7; i++) {
+          frequency[i] = last50.filter((d) => d === i).length
+        }
+
+        // Find the digit with the lowest frequency
+        let lowestDigit = 2
+        let lowestCount = last50.length // Initialize with a value higher than any possible count
+
+        for (let i = 2; i <= 7; i++) {
+          if (frequency[i] < lowestCount) {
+            lowestCount = frequency[i]
+            lowestDigit = i
+          }
+        }
+
+        const lowestPercent = (lowestCount / last50.length) * 100
+
+        // Strategy condition: <10% power (meaning the digit appears less than 10% of the time)
+        return {
+          marketPower: 100 - lowestPercent, // Higher marketPower means less frequent digit is more dominant
+          trend: lowestPercent < 10 ? "strong" : "neutral", // 'strong' implies the condition for trading is met
+          signal: lowestPercent < 10 ? "TRADE NOW" : "WAIT",
+          entryPoint: `DIFFERS ${lowestDigit}`,
+          exitPoint: "After 5 ticks",
+          distribution: { lowestDigit, frequency: lowestPercent.toFixed(1) }, // Store info about the lowest digit
+        }
+      }
+
+      default:
+        return { marketPower: 0, trend: "neutral", signal: "WAIT", entryPoint: null, exitPoint: null }
+    }
+  }
+
+  const handleStartBot = async (strategy: BotStrategy) => {
+    if (activeBots.has(strategy)) return
 
     try {
-      if (!apiClient) {
-        setLocalError("API client not initialized. Please wait for connection...")
-        setIsLoading(false)
+      if (!apiClient || !isConnected || !isAuthorized) {
+        console.error("[v0] Cannot start bot - API not ready")
         return
       }
 
-      if (!isConnected) {
-        setLocalError("API not connected. Please check your connection and try again.")
-        setIsLoading(false)
-        return
-      }
-
-      if (!isAuthorized) {
-        setLocalError("API not authorized. Please authenticate first.")
-        setIsLoading(false)
-        return
-      }
-
+      // Validate and prepare config
       if (config.initialStake <= 0) {
-        setLocalError("Initial stake must be greater than 0")
-        setIsLoading(false)
+        console.error("[v0] Initial stake must be greater than 0")
         return
       }
-
       if (config.initialStake > config.balance) {
-        setLocalError("Initial stake cannot exceed account balance")
-        setIsLoading(false)
+        console.error("[v0] Initial stake cannot exceed account balance")
         return
       }
 
       const validatedStake = Math.round(config.initialStake * 100) / 100
       const validatedConfig = { ...config, initialStake: validatedStake }
 
-      console.log(`[v0] Starting AutoBot with config:`, validatedConfig)
+      console.log(`[v0] Starting ${strategy} bot with config:`, validatedConfig)
 
-      const newBot = new AutoBot(apiClient, selectedStrategy, validatedConfig)
-      setBot(newBot)
+      const newBot = new AutoBot(apiClient, strategy, validatedConfig)
 
-      const updateInterval = setInterval(() => {
-        const analysis = newBot.getCurrentAnalysis()
-        setAnalysisData(analysis)
-      }, 1000)
+      await newBot.start((state) => {
+        setBotStates((prev) => new Map(prev).set(strategy, state))
+      })
 
-      try {
-        await newBot.start((state) => {
-          setBotState(state)
-        })
-      } catch (err: any) {
-        console.error("[v0] Bot start error:", err)
-        setLocalError(err.message || "Failed to start bot")
-        clearInterval(updateInterval)
-        setBot(null)
-        setBotState(null)
-        setIsLoading(false)
-        return
-      }
-
-      return () => clearInterval(updateInterval)
-    } catch (err: any) {
-      console.error("[v0] Error starting bot:", err)
-      setLocalError(err.message || "Failed to start bot. Please try again.")
-      setBot(null)
-      setBotState(null)
-    } finally {
-      setIsLoading(false)
+      setActiveBots((prev) => new Map(prev).set(strategy, newBot))
+    } catch (error: any) {
+      console.error(`[v0] Error starting ${strategy} bot:`, error)
+      // Optionally display error to user
     }
   }
 
-  const handleStop = () => {
+  const handleStopBot = (strategy: BotStrategy) => {
+    const bot = activeBots.get(strategy)
     if (bot) {
-      console.log("[v0] Stopping bot...")
+      console.log(`[v0] Stopping ${strategy} bot...`)
       bot.stop()
-      setBot(null)
-      setBotState(null)
-      setLocalError(null)
+      setActiveBots((prev) => {
+        const newMap = new Map(prev)
+        newMap.delete(strategy)
+        return newMap
+      })
+      setBotStates((prev) => {
+        const newMap = new Map(prev)
+        newMap.delete(strategy)
+        return newMap
+      })
     }
   }
 
-  const tpAmount = (config.balance * config.tpPercent) / 100
-  const slAmount = (config.balance * config.slPercent) / 100
-  const tpProgress = botState ? Math.min((botState.profitLoss / tpAmount) * 100, 100) : 0
-  const slProgress = botState ? Math.min((Math.abs(botState.profitLoss) / slAmount) * 100, 100) : 0
-
-  const isRunning = botState?.isRunning || false
-  const canStart = !isRunning && isConnected && isAuthorized && !isLoading
+  // Emergency Stop for ALL bots
+  const handleEmergencyStopAll = () => {
+    console.log("[v0] EMERGENCY STOP ACTIVATED for all bots")
+    activeBots.forEach((bot, strategy) => {
+      bot.stop()
+      console.log(`[v0] Stopped ${strategy} bot during emergency stop.`)
+    })
+    setActiveBots(new Map())
+    setBotStates(new Map())
+  }
 
   return (
     <div className="space-y-6">
       {/* Connection Status Alert */}
-      {(apiError || localError || !isConnected) && (
+      {(apiError || !isConnected) && (
         <Card className={theme === "dark" ? "bg-red-500/10 border-red-500/30" : "bg-red-50 border-red-200"}>
           <CardContent className="pt-6 flex items-start gap-3">
             <AlertCircle className={`w-5 h-5 flex-shrink-0 ${theme === "dark" ? "text-red-400" : "text-red-600"}`} />
             <div>
               <p className={`font-semibold ${theme === "dark" ? "text-red-400" : "text-red-700"}`}>Connection Issue</p>
               <p className={`text-sm mt-1 ${theme === "dark" ? "text-red-300" : "text-red-600"}`}>
-                {localError || apiError || "Connecting to API..."}
+                {apiError || "Connecting to API..."}
               </p>
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Emergency Stop Alert */}
-      {isRunning && (
-        <Card className={theme === "dark" ? "bg-orange-500/10 border-orange-500/30" : "bg-orange-50 border-orange-200"}>
-          <CardContent className="pt-6 flex items-center justify-between">
-            <div className="flex items-start gap-3">
-              <AlertTriangle
-                className={`w-5 h-5 flex-shrink-0 ${theme === "dark" ? "text-orange-400" : "text-orange-600"}`}
-              />
-              <div>
-                <p className={`font-semibold ${theme === "dark" ? "text-orange-400" : "text-orange-700"}`}>
-                  Bot Running
-                </p>
-                <p className={`text-sm mt-1 ${theme === "dark" ? "text-orange-300" : "text-orange-600"}`}>
-                  Click Emergency Stop to halt immediately
-                </p>
-              </div>
-            </div>
-            <Button
-              onClick={() => setEmergencyStop(true)}
-              className="bg-red-600 hover:bg-red-700 text-white ml-4 flex-shrink-0"
-            >
-              🚨 Emergency Stop
-            </Button>
           </CardContent>
         </Card>
       )}
@@ -261,57 +351,12 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
         <CardHeader>
           <CardTitle className={theme === "dark" ? "text-white" : "text-gray-900"}>Trading Market</CardTitle>
           <CardDescription className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
-            Using market from analysis tool
+            All bots will trade on this market
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/30">
             <p className={`text-lg font-bold ${theme === "dark" ? "text-blue-400" : "text-blue-600"}`}>{symbol}</p>
-            <p className={`text-sm mt-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-              All bots will trade on this market
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Bot Selection */}
-      <Card
-        className={
-          theme === "dark"
-            ? "bg-gradient-to-br from-[#0f1629]/80 to-[#1a2235]/80 border-blue-500/20"
-            : "bg-white border-gray-200"
-        }
-      >
-        <CardHeader>
-          <CardTitle className={theme === "dark" ? "text-white" : "text-gray-900"}>Select AutoBot Strategy</CardTitle>
-          <CardDescription className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
-            Choose a trading bot strategy to automate your trades
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {BOT_STRATEGIES.map((strategy) => (
-              <div
-                key={strategy.id}
-                onClick={() => !isRunning && setSelectedStrategy(strategy.id)}
-                className={`p-4 rounded-lg border cursor-pointer transition-all ${
-                  selectedStrategy === strategy.id
-                    ? theme === "dark"
-                      ? "bg-blue-500/20 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]"
-                      : "bg-blue-100 border-blue-500"
-                    : theme === "dark"
-                      ? "bg-blue-500/5 border-blue-500/20 hover:bg-blue-500/10"
-                      : "bg-gray-50 border-gray-200 hover:bg-gray-100"
-                } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
-              >
-                <h3 className={`font-bold mb-2 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                  {strategy.name}
-                </h3>
-                <p className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  {strategy.description}
-                </p>
-              </div>
-            ))}
           </div>
         </CardContent>
       </Card>
@@ -325,9 +370,9 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
         }
       >
         <CardHeader>
-          <CardTitle className={theme === "dark" ? "text-white" : "text-gray-900"}>Bot Configuration</CardTitle>
+          <CardTitle className={theme === "dark" ? "text-white" : "text-gray-900"}>Global Configuration</CardTitle>
           <CardDescription className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
-            Configure your bot parameters
+            Applied to all bots
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -338,18 +383,6 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                 type="number"
                 value={config.initialStake}
                 onChange={(e) => setConfig({ ...config, initialStake: Number.parseFloat(e.target.value) })}
-                disabled={isRunning}
-                className={theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className={theme === "dark" ? "text-white" : "text-gray-900"}>Duration (ticks)</Label>
-              <Input
-                type="number"
-                value={config.duration}
-                onChange={(e) => setConfig({ ...config, duration: Number.parseInt(e.target.value) })}
-                disabled={isRunning}
                 className={theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}
               />
             </div>
@@ -360,7 +393,6 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                 type="number"
                 value={config.tpPercent}
                 onChange={(e) => setConfig({ ...config, tpPercent: Number.parseFloat(e.target.value) })}
-                disabled={isRunning}
                 className={theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}
               />
             </div>
@@ -371,396 +403,225 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                 type="number"
                 value={config.slPercent}
                 onChange={(e) => setConfig({ ...config, slPercent: Number.parseFloat(e.target.value) })}
-                disabled={isRunning}
-                className={theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className={theme === "dark" ? "text-white" : "text-gray-900"}>Cooldown (ms)</Label>
-              <Input
-                type="number"
-                value={config.cooldownMs}
-                onChange={(e) => setConfig({ ...config, cooldownMs: Number.parseInt(e.target.value) })}
-                disabled={isRunning}
-                className={theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className={theme === "dark" ? "text-white" : "text-gray-900"}>Martingale Multiplier</Label>
-              <Input
-                type="number"
-                step="0.1"
-                value={config.martingaleMultiplier}
-                onChange={(e) => setConfig({ ...config, martingaleMultiplier: Number.parseFloat(e.target.value) })}
-                disabled={isRunning || !config.useMartingale}
                 className={theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}
               />
             </div>
           </div>
 
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={config.useMartingale}
-                onCheckedChange={(checked) => setConfig({ ...config, useMartingale: checked })}
-                disabled={isRunning}
-              />
-              <Label className={theme === "dark" ? "text-white" : "text-gray-900"}>Enable Martingale</Label>
-            </div>
-
-            {isRunning ? (
-              <Button onClick={handleStop} variant="destructive" className="gap-2" disabled={isLoading}>
-                <Square className="w-4 h-4" />
-                Stop Bot
-              </Button>
-            ) : (
-              <Button
-                onClick={handleStart}
-                className="bg-green-500 hover:bg-green-600 gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={!canStart}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader className="w-4 h-4 animate-spin" />
-                    Starting...
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4" />
-                    Start Bot
-                  </>
-                )}
-              </Button>
-            )}
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={config.useMartingale}
+              onCheckedChange={(checked) => setConfig({ ...config, useMartingale: checked })}
+            />
+            <Label className={theme === "dark" ? "text-white" : "text-gray-900"}>Enable Martingale</Label>
           </div>
         </CardContent>
       </Card>
 
-      {/* Continuous Trading Analysis */}
-      {isRunning && analysisData && (
-        <Card
-          className={
-            theme === "dark"
-              ? "bg-gradient-to-br from-[#0f1629]/80 to-[#1a2235]/80 border-blue-500/20"
-              : "bg-white border-gray-200"
-          }
-        >
-          <CardHeader>
-            <CardTitle className={theme === "dark" ? "text-white" : "text-gray-900"}>
-              Continuous Trading Analysis
-            </CardTitle>
-            <CardDescription className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
-              Real-time proposal and market data
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Current Market Data */}
-              {analysisData.analysis && (
-                <>
-                  <div
-                    className={`p-3 rounded-lg ${theme === "dark" ? "bg-blue-500/10 border border-blue-500/30" : "bg-blue-50 border border-blue-200"}`}
-                  >
-                    <p className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Current Price</p>
-                    <p className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                      ${analysisData.analysis.currentPrice?.toFixed(5)}
-                    </p>
-                    <p className={`text-xs mt-1 ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
-                      Last Digit: {analysisData.analysis.lastDigit}
-                    </p>
-                  </div>
-
-                  <div
-                    className={`p-3 rounded-lg ${theme === "dark" ? "bg-purple-500/10 border border-purple-500/30" : "bg-purple-50 border border-purple-200"}`}
-                  >
-                    <p className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Contract Type</p>
-                    <p className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                      {analysisData.analysis.contractType}
-                    </p>
-                    {analysisData.analysis.prediction && (
-                      <p className={`text-xs mt-1 ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
-                        Prediction: {analysisData.analysis.prediction}
-                      </p>
-                    )}
-                  </div>
-
-                  <div
-                    className={`p-3 rounded-lg ${theme === "dark" ? "bg-green-500/10 border border-green-500/30" : "bg-green-50 border border-green-200"}`}
-                  >
-                    <p className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Ask Price</p>
-                    <p className={`text-lg font-bold ${theme === "dark" ? "text-green-400" : "text-green-600"}`}>
-                      ${analysisData.analysis.proposal?.askPrice?.toFixed(2)}
-                    </p>
-                    <p className={`text-xs mt-1 ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
-                      Payout: ${analysisData.analysis.proposal?.payout?.toFixed(2)}
-                    </p>
-                  </div>
-
-                  <div
-                    className={`p-3 rounded-lg ${theme === "dark" ? "bg-orange-500/10 border border-orange-500/30" : "bg-orange-50 border border-orange-200"}`}
-                  >
-                    <p className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Avg Probability</p>
-                    <p className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                      {analysisData.proposalMetrics?.avgProbability?.toFixed(1)}%
-                    </p>
-                    <p className={`text-xs mt-1 ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
-                      Active Contracts: {analysisData.proposalMetrics?.totalProposals}
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Proposal Longcode */}
-            {analysisData.analysis?.proposal?.longcode && (
-              <div
-                className={`p-3 rounded-lg ${theme === "dark" ? "bg-gray-800 border border-gray-700" : "bg-gray-50 border border-gray-200"}`}
-              >
-                <p className={`text-xs font-semibold ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  Contract Details
+      {/* Emergency Stop Button for ALL bots */}
+      {activeBots.size > 0 && (
+        <Card className={theme === "dark" ? "bg-orange-500/10 border-orange-500/30" : "bg-orange-50 border-orange-200"}>
+          <CardContent className="pt-6 flex items-center justify-between">
+            <div className="flex items-start gap-3">
+              <AlertTriangle
+                className={`w-5 h-5 flex-shrink-0 ${theme === "dark" ? "text-orange-400" : "text-orange-600"}`}
+              />
+              <div>
+                <p className={`font-semibold ${theme === "dark" ? "text-orange-400" : "text-orange-700"}`}>
+                  Active Bots Detected
                 </p>
-                <p className={`text-sm mt-2 ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}>
-                  {analysisData.analysis.proposal.longcode}
+                <p className={`text-sm mt-1 ${theme === "dark" ? "text-orange-300" : "text-orange-600"}`}>
+                  Click "EMERGENCY STOP ALL" to halt all running bots immediately.
                 </p>
               </div>
-            )}
+            </div>
+            <Button
+              onClick={handleEmergencyStopAll}
+              className="bg-red-600 hover:bg-red-700 text-white ml-4 flex-shrink-0"
+            >
+              🚨 EMERGENCY STOP ALL
+            </Button>
           </CardContent>
         </Card>
       )}
 
-      {/* Bot Dashboard */}
-      {botState && (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card
-              className={
-                theme === "dark"
-                  ? "bg-gradient-to-br from-blue-500/10 to-blue-500/5 border-blue-500/30"
-                  : "bg-blue-50 border-blue-200"
-              }
-            >
-              <CardHeader className="pb-2">
-                <CardTitle className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  Total Runs
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className={`text-3xl font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                  {botState.totalRuns}
-                </div>
-                <div className={`text-sm mt-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  {botState.wins}W / {botState.losses}L
-                </div>
-              </CardContent>
-            </Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {BOT_STRATEGIES.map((strategy) => {
+          const analysis = botAnalysis.get(strategy.id)
+          const isReady = botReadyStatus.get(strategy.id) || false
+          const botState = botStates.get(strategy.id)
+          const isRunning = activeBots.has(strategy.id)
 
+          return (
             <Card
-              className={
-                botState.profitLoss >= 0
+              key={strategy.id}
+              className={`${
+                isReady && !isRunning
                   ? theme === "dark"
-                    ? "bg-gradient-to-br from-green-500/10 to-green-500/5 border-green-500/30"
-                    : "bg-green-50 border-green-200"
+                    ? "bg-gradient-to-br from-green-500/20 to-emerald-500/10 border-green-500/50 shadow-[0_0_20px_rgba(34,197,94,0.4)] animate-pulse"
+                    : "bg-gradient-to-br from-green-50 to-emerald-50 border-green-400"
                   : theme === "dark"
-                    ? "bg-gradient-to-br from-red-500/10 to-red-500/5 border-red-500/30"
-                    : "bg-red-50 border-red-200"
-              }
+                    ? "bg-gradient-to-br from-[#0f1629]/80 to-[#1a2235]/80 border-blue-500/20"
+                    : "bg-white border-gray-200"
+              }`}
             >
-              <CardHeader className="pb-2">
-                <CardTitle className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  Profit/Loss
-                </CardTitle>
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle className={`text-base ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                      {strategy.name}
+                    </CardTitle>
+                    <CardDescription className={`text-xs mt-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                      {strategy.description}
+                    </CardDescription>
+                  </div>
+                  {isReady && !isRunning && <Badge className="bg-green-500 text-white animate-pulse">READY</Badge>}
+                  {isRunning && (
+                    <Badge className="bg-blue-500 text-white">
+                      <Activity className="w-3 h-3 mr-1 animate-spin" />
+                      ACTIVE
+                    </Badge>
+                  )}
+                </div>
               </CardHeader>
-              <CardContent>
-                <div
-                  className={`text-3xl font-bold flex items-center gap-2 ${
-                    botState.profitLoss >= 0
-                      ? theme === "dark"
-                        ? "text-green-400"
-                        : "text-green-600"
-                      : theme === "dark"
-                        ? "text-red-400"
-                        : "text-red-600"
-                  }`}
-                >
-                  {botState.profitLoss >= 0 ? <TrendingUp className="w-6 h-6" /> : <TrendingDown className="w-6 h-6" />}
-                  ${Math.abs(botState.profitLoss).toFixed(2)}
-                </div>
-                <div className={`text-sm mt-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  {botState.profitLossPercent.toFixed(2)}% of balance
-                </div>
-              </CardContent>
-            </Card>
 
-            <Card
-              className={
-                theme === "dark"
-                  ? "bg-gradient-to-br from-purple-500/10 to-purple-500/5 border-purple-500/30"
-                  : "bg-purple-50 border-purple-200"
-              }
-            >
-              <CardHeader className="pb-2">
-                <CardTitle className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  Win Rate
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className={`text-3xl font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                  {botState.totalRuns > 0 ? ((botState.wins / botState.totalRuns) * 100).toFixed(1) : "0"}%
-                </div>
-                <div className={`text-sm mt-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  {botState.wins} wins
-                </div>
-              </CardContent>
-            </Card>
+              <CardContent className="space-y-3">
+                {/* Live Market Data */}
+                {analysis && (
+                  <>
+                    <div
+                      className={`p-3 rounded-lg ${theme === "dark" ? "bg-blue-500/10 border border-blue-500/30" : "bg-blue-50 border border-blue-200"}`}
+                    >
+                      <div className="flex justify-between items-center mb-2">
+                        <span className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                          Market Power
+                        </span>
+                        <span className={`text-sm font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                          {analysis.marketPower.toFixed(1)}%
+                        </span>
+                      </div>
+                      <Progress
+                        value={analysis.marketPower}
+                        className={`h-2 ${theme === "dark" ? "bg-gray-700" : "bg-gray-200"}`}
+                      />
+                    </div>
 
-            <Card
-              className={
-                theme === "dark"
-                  ? "bg-gradient-to-br from-orange-500/10 to-orange-500/5 border-orange-500/30"
-                  : "bg-orange-50 border-orange-200"
-              }
-            >
-              <CardHeader className="pb-2">
-                <CardTitle className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  Current Stake
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className={`text-3xl font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                  ${botState.currentStake.toFixed(2)}
-                </div>
-                <div className={`text-sm mt-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  {botState.consecutiveLosses} consecutive losses
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* TP/SL Progress */}
-          <Card
-            className={
-              theme === "dark"
-                ? "bg-gradient-to-br from-[#0f1629]/80 to-[#1a2235]/80 border-blue-500/20"
-                : "bg-white border-gray-200"
-            }
-          >
-            <CardHeader>
-              <CardTitle className={theme === "dark" ? "text-white" : "text-gray-900"}>TP/SL Tracker</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <div className="flex justify-between mb-2">
-                  <span className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                    Take Profit Target: ${tpAmount.toFixed(2)}
-                  </span>
-                  <span className={`text-sm font-bold ${theme === "dark" ? "text-green-400" : "text-green-600"}`}>
-                    {tpProgress.toFixed(1)}%
-                  </span>
-                </div>
-                <Progress value={tpProgress} className="h-2 bg-gray-700">
-                  <div className="h-full bg-green-500 transition-all" style={{ width: `${tpProgress}%` }} />
-                </Progress>
-              </div>
-
-              <div>
-                <div className="flex justify-between mb-2">
-                  <span className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                    Stop Loss Limit: ${slAmount.toFixed(2)}
-                  </span>
-                  <span className={`text-sm font-bold ${theme === "dark" ? "text-red-400" : "text-red-600"}`}>
-                    {slProgress.toFixed(1)}%
-                  </span>
-                </div>
-                <Progress value={slProgress} className="h-2 bg-gray-700">
-                  <div className="h-full bg-red-500 transition-all" style={{ width: `${slProgress}%` }} />
-                </Progress>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Trade Log */}
-          <Card
-            className={
-              theme === "dark"
-                ? "bg-gradient-to-br from-[#0f1629]/80 to-[#1a2235]/80 border-blue-500/20"
-                : "bg-white border-gray-200"
-            }
-          >
-            <CardHeader>
-              <CardTitle className={theme === "dark" ? "text-white" : "text-gray-900"}>Trade Log</CardTitle>
-              <CardDescription className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
-                Recent trades (last 50)
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className={`border-b ${theme === "dark" ? "border-gray-700" : "border-gray-200"}`}>
-                      <th className={`text-left p-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Time</th>
-                      <th className={`text-left p-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                        Contract
-                      </th>
-                      <th className={`text-left p-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                        Result
-                      </th>
-                      <th className={`text-right p-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                        Stake
-                      </th>
-                      <th className={`text-right p-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>P/L</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {botState.trades.map((trade) => (
-                      <tr
-                        key={trade.id}
-                        className={`border-b ${theme === "dark" ? "border-gray-800" : "border-gray-100"}`}
+                    {/* Statistical Analysis */}
+                    <div
+                      className={`p-3 rounded-lg ${theme === "dark" ? "bg-purple-500/10 border border-purple-500/30" : "bg-purple-50 border border-purple-200"}`}
+                    >
+                      <div
+                        className={`text-xs font-semibold mb-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}
                       >
-                        <td className={`p-2 text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                          {new Date(trade.timestamp).toLocaleTimeString()}
-                        </td>
-                        <td className={`p-2 text-sm ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                          {trade.contract}
-                        </td>
-                        <td className="p-2">
-                          <Badge
-                            variant={trade.result === "WIN" ? "default" : "destructive"}
-                            className={
-                              trade.result === "WIN" ? "bg-green-500 hover:bg-green-600" : "bg-red-500 hover:bg-red-600"
-                            }
-                          >
-                            {trade.result}
-                          </Badge>
-                        </td>
-                        <td
-                          className={`p-2 text-sm text-right ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}
+                        Distribution
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {Object.entries(analysis.distribution || {}).map(([key, value]) => (
+                          <div key={key} className="text-center">
+                            <div className={`text-xs ${theme === "dark" ? "text-gray-500" : "text-gray-600"}`}>
+                              {key}
+                            </div>
+                            <div className={`text-sm font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                              {value}%
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Trade Conditions */}
+                    <div
+                      className={`p-3 rounded-lg text-xs ${theme === "dark" ? "bg-gray-800 border border-gray-700" : "bg-gray-50 border border-gray-200"}`}
+                    >
+                      <div className={`font-semibold mb-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                        Signal:{" "}
+                        <span
+                          className={`
+                          ${analysis.signal === "STRONG" ? "text-green-400" : ""}
+                          ${analysis.signal === "TRADE NOW" ? "text-yellow-400" : ""}
+                          ${analysis.signal === "WAIT" ? "text-blue-400" : ""}
+                          ${analysis.signal === "NEUTRAL" ? "text-gray-400" : ""}
+                        `}
                         >
-                          ${trade.stake.toFixed(2)}
-                        </td>
-                        <td
-                          className={`p-2 text-sm text-right font-bold ${
-                            trade.profitLoss >= 0
-                              ? theme === "dark"
-                                ? "text-green-400"
-                                : "text-green-600"
-                              : theme === "dark"
-                                ? "text-red-400"
-                                : "text-red-600"
-                          }`}
-                        >
-                          {trade.profitLoss >= 0 ? "+" : ""}${trade.profitLoss.toFixed(2)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </>
-      )}
+                          {analysis.signal}
+                        </span>
+                      </div>
+                      <div className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
+                        Entry: {analysis.entryPoint || "N/A"}
+                      </div>
+                      <div className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
+                        Exit: {analysis.exitPoint || "N/A"}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Condition Details */}
+                <div
+                  className={`p-2 rounded text-xs ${theme === "dark" ? "bg-gray-800/50 text-gray-400" : "bg-gray-50 text-gray-600"}`}
+                >
+                  {strategy.condition}
+                </div>
+
+                {/* Bot Stats if running */}
+                {botState && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div
+                      className={`p-2 rounded-lg text-center ${theme === "dark" ? "bg-green-500/10" : "bg-green-50"}`}
+                    >
+                      <div className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Wins</div>
+                      <div className={`text-lg font-bold ${theme === "dark" ? "text-green-400" : "text-green-600"}`}>
+                        {botState.wins}
+                      </div>
+                    </div>
+                    <div className={`p-2 rounded-lg text-center ${theme === "dark" ? "bg-red-500/10" : "bg-red-50"}`}>
+                      <div className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Losses</div>
+                      <div className={`text-lg font-bold ${theme === "dark" ? "text-red-400" : "text-red-600"}`}>
+                        {botState.losses}
+                      </div>
+                    </div>
+                    <div
+                      className={`col-span-2 p-2 rounded-lg text-center ${botState.profitLoss >= 0 ? (theme === "dark" ? "bg-green-500/10" : "bg-green-50") : theme === "dark" ? "bg-red-500/10" : "bg-red-50"}`}
+                    >
+                      <div className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>P/L</div>
+                      <div
+                        className={`text-lg font-bold ${botState.profitLoss >= 0 ? (theme === "dark" ? "text-green-400" : "text-green-600") : theme === "dark" ? "text-red-400" : "text-red-600"}`}
+                      >
+                        ${botState.profitLoss.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Start/Stop Button */}
+                {isRunning ? (
+                  <Button
+                    onClick={() => handleStopBot(strategy.id)}
+                    variant="destructive"
+                    className="w-full gap-2"
+                    size="sm"
+                  >
+                    <Square className="w-4 h-4" />
+                    Stop
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={() => handleStartBot(strategy.id)}
+                    className={`w-full gap-2 ${
+                      isReady ? "bg-green-500 hover:bg-green-600 animate-pulse" : "bg-blue-500 hover:bg-blue-600"
+                    }`}
+                    disabled={!isConnected || !isAuthorized}
+                    size="sm"
+                  >
+                    <Play className="w-4 h-4" />
+                    {isReady ? "Start Trading" : "Start"}
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
     </div>
   )
 }
