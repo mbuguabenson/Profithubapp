@@ -56,8 +56,12 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
   const [showSignalPopup, setShowSignalPopup] = useState(false)
   const tickManagerRef = useRef<TickHistoryManager | null>(null)
   const apiClientRef = useRef<any>(null)
+  const isInitializedRef = useRef(false)
 
   useEffect(() => {
+    if (isInitializedRef.current) return
+    isInitializedRef.current = true
+
     const initMarkets = async () => {
       const initialData = new Map<string, MarketData>()
 
@@ -107,7 +111,7 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
           if (!marketData || digits.length < 100) return
 
           const lastDigit = digits[digits.length - 1]
-          const currentPrice = Math.random() * 1000 // Simulated price
+          const currentPrice = Math.random() * 1000
 
           const underCount = digits.filter((d) => d < 5).length
           const overCount = digits.filter((d) => d >= 5).length
@@ -165,12 +169,6 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
 
     return () => {
       clearInterval(updateInterval)
-      if (tickManagerRef.current) {
-        tickManagerRef.current.cleanup()
-      }
-      if (apiClientRef.current) {
-        apiClientRef.current.disconnect()
-      }
     }
   }, [])
 
@@ -343,6 +341,18 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
     }
   }
 
+  const handleCloseAllSignals = () => {
+    setShowSignalPopup(false)
+    setTradeSignals([])
+  }
+
+  const handleCloseSignal = (idx: number) => {
+    setTradeSignals((prev) => prev.filter((_, i) => i !== idx))
+    if (tradeSignals.length <= 1) {
+      setShowSignalPopup(false)
+    }
+  }
+
   const totalMarkets = Array.from(marketsData.values())
   const marketsWithSignals = totalMarkets.filter(
     (m) =>
@@ -490,13 +500,11 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
 
       {showSignalPopup && tradeSignals.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="max-w-4xl w-full max-h-[90vh] overflow-y-auto space-y-4">
-            <div className="flex justify-end mb-2">
+          <div className="max-w-6xl w-full max-h-[85vh] overflow-hidden flex flex-col bg-gray-900/95 rounded-2xl">
+            <div className="flex justify-between items-center p-4 border-b border-white/10">
+              <h3 className="text-xl font-bold text-white">Active Trade Signals</h3>
               <Button
-                onClick={() => {
-                  setShowSignalPopup(false)
-                  setTradeSignals([])
-                }}
+                onClick={handleCloseAllSignals}
                 variant="outline"
                 size="sm"
                 className="bg-red-500/20 hover:bg-red-500/30 border-red-500/50 text-white"
@@ -506,109 +514,104 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
               </Button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {tradeSignals.map((signal, idx) => {
-                const bgColors = {
-                  "even-odd":
-                    theme === "dark"
-                      ? "from-green-900/90 to-emerald-900/90 border-green-500/50 shadow-[0_0_30px_rgba(34,197,94,0.5)]"
-                      : "from-green-50 to-emerald-50 border-green-400",
-                  "over-under":
-                    theme === "dark"
-                      ? "from-blue-900/90 to-cyan-900/90 border-blue-500/50 shadow-[0_0_30px_rgba(59,130,246,0.5)]"
-                      : "from-blue-50 to-cyan-50 border-blue-400",
-                  differs:
-                    theme === "dark"
-                      ? "from-purple-900/90 to-violet-900/90 border-purple-500/50 shadow-[0_0_30px_rgba(168,85,247,0.5)]"
-                      : "from-purple-50 to-violet-50 border-purple-400",
-                }
+            <div className="overflow-y-auto p-4 flex-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {tradeSignals.map((signal, idx) => {
+                  const bgColors = {
+                    "even-odd":
+                      theme === "dark"
+                        ? "from-green-900/90 to-emerald-900/90 border-green-500/50 shadow-[0_0_30px_rgba(34,197,94,0.5)]"
+                        : "from-green-50 to-emerald-50 border-green-400",
+                    "over-under":
+                      theme === "dark"
+                        ? "from-blue-900/90 to-cyan-900/90 border-blue-500/50 shadow-[0_0_30px_rgba(59,130,246,0.5)]"
+                        : "from-blue-50 to-cyan-50 border-blue-400",
+                    differs:
+                      theme === "dark"
+                        ? "from-purple-900/90 to-violet-900/90 border-purple-500/50 shadow-[0_0_30px_rgba(168,85,247,0.5)]"
+                        : "from-purple-50 to-violet-50 border-purple-400",
+                  }
 
-                const textColors = {
-                  "even-odd": theme === "dark" ? "text-green-400" : "text-green-600",
-                  "over-under": theme === "dark" ? "text-blue-400" : "text-blue-600",
-                  differs: theme === "dark" ? "text-purple-400" : "text-purple-600",
-                }
+                  const textColors = {
+                    "even-odd": theme === "dark" ? "text-green-400" : "text-green-600",
+                    "over-under": theme === "dark" ? "text-blue-400" : "text-blue-600",
+                    differs: theme === "dark" ? "text-purple-400" : "text-purple-600",
+                  }
 
-                return (
-                  <div
-                    key={idx}
-                    className={`bg-gradient-to-br ${bgColors[signal.category]} border-2 rounded-xl p-6 animate-pulse relative`}
-                  >
-                    <Button
-                      onClick={() => {
-                        setTradeSignals((prev) => prev.filter((_, i) => i !== idx))
-                        if (tradeSignals.length <= 1) {
-                          setShowSignalPopup(false)
-                        }
-                      }}
-                      variant="ghost"
-                      size="icon"
-                      className="absolute top-2 right-2 h-6 w-6 hover:bg-white/10"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-
-                    <div className={`text-2xl font-bold flex items-center gap-2 mb-4 ${textColors[signal.category]}`}>
-                      <Zap className="h-6 w-6" />
-                      TRADE NOW!
-                    </div>
-
+                  return (
                     <div
-                      className={`p-4 rounded-lg border mb-4 ${theme === "dark" ? "bg-gray-900/50 border-white/10" : "bg-white border-gray-200"}`}
+                      key={idx}
+                      className={`bg-gradient-to-br ${bgColors[signal.category]} border-2 rounded-xl p-4 relative`}
                     >
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <div>
-                          <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Market:</span>
-                          <div className={`font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                            {signal.market}
+                      <Button
+                        onClick={() => handleCloseSignal(idx)}
+                        variant="ghost"
+                        size="icon"
+                        className="absolute top-2 right-2 h-6 w-6 hover:bg-white/10"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+
+                      <div className={`text-xl font-bold flex items-center gap-2 mb-3 ${textColors[signal.category]}`}>
+                        <Zap className="h-5 w-5" />
+                        TRADE NOW!
+                      </div>
+
+                      <div
+                        className={`p-3 rounded-lg border mb-3 ${theme === "dark" ? "bg-gray-900/50 border-white/10" : "bg-white border-gray-200"}`}
+                      >
+                        <div className="space-y-2 text-xs">
+                          <div className="flex justify-between">
+                            <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Market:</span>
+                            <div className={`font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                              {signal.market}
+                            </div>
                           </div>
-                        </div>
-                        <div>
-                          <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Trade Type:</span>
-                          <div className={`font-bold ${textColors[signal.category]}`}>{signal.tradeType}</div>
-                        </div>
-                        <div>
-                          <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Entry Point:</span>
-                          <div className={`font-bold ${theme === "dark" ? "text-cyan-400" : "text-cyan-600"}`}>
-                            {signal.entryPoint}
+                          <div className="flex justify-between">
+                            <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Type:</span>
+                            <div className={`font-bold ${textColors[signal.category]}`}>{signal.tradeType}</div>
                           </div>
-                        </div>
-                        <div>
-                          <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Validity:</span>
-                          <div className={`font-bold ${theme === "dark" ? "text-orange-400" : "text-orange-600"}`}>
-                            {signal.validity}
+                          <div className="flex justify-between">
+                            <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Entry:</span>
+                            <div className={`font-bold ${theme === "dark" ? "text-cyan-400" : "text-cyan-600"}`}>
+                              {signal.entryPoint}
+                            </div>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Validity:</span>
+                            <div className={`font-bold ${theme === "dark" ? "text-orange-400" : "text-orange-600"}`}>
+                              {signal.validity}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div
-                      className={`p-4 rounded-lg border mb-4 ${theme === "dark" ? `${signal.category === "even-odd" ? "bg-green-500/10 border-green-500/30" : signal.category === "over-under" ? "bg-blue-500/10 border-blue-500/30" : "bg-purple-500/10 border-purple-500/30"}` : `${signal.category === "even-odd" ? "bg-green-100 border-green-300" : signal.category === "over-under" ? "bg-blue-100 border-blue-300" : "bg-purple-100 border-purple-300"}`}`}
-                    >
-                      <div className={`text-sm font-bold mb-2 ${textColors[signal.category]}`}>Trade Conditions:</div>
-                      <ul className="space-y-1">
-                        {signal.conditions.map((condition, condIdx) => (
-                          <li
-                            key={condIdx}
-                            className={`text-sm ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}
-                          >
-                            • {condition}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                      <div
+                        className={`p-3 rounded-lg border mb-3 ${theme === "dark" ? `${signal.category === "even-odd" ? "bg-green-500/10 border-green-500/30" : signal.category === "over-under" ? "bg-blue-500/10 border-blue-500/30" : "bg-purple-500/10 border-purple-500/30"}` : `${signal.category === "even-odd" ? "bg-green-100 border-green-300" : signal.category === "over-under" ? "bg-blue-100 border-blue-300" : "bg-purple-100 border-purple-300"}`}`}
+                      >
+                        <div className={`text-xs font-bold mb-2 ${textColors[signal.category]}`}>Conditions:</div>
+                        <ul className="space-y-1">
+                          {signal.conditions.map((condition, condIdx) => (
+                            <li
+                              key={condIdx}
+                              className={`text-xs ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}
+                            >
+                              • {condition}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
 
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                      <div className="text-center">
+                        <span className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
                           Confidence:
                         </span>
-                        <div className={`text-2xl font-bold ${textColors[signal.category]}`}>{signal.confidence}%</div>
+                        <div className={`text-xl font-bold ${textColors[signal.category]}`}>{signal.confidence}%</div>
                       </div>
                     </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
           </div>
         </div>
