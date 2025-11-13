@@ -19,11 +19,6 @@ import { TransactionHistory } from "@/components/transaction-history"
 import { TradingJournalPanel } from "@/components/trading-journal-panel"
 import { TradeLog } from "@/components/trade-log"
 
-// Define CleanTradeEngine if it's not imported
-// For demonstration purposes, assuming it's a placeholder
-// In a real scenario, ensure this type is correctly imported or defined.
-type CleanTradeEngine = {}
-
 interface AnalysisLogEntry {
   timestamp: Date
   message: string
@@ -59,7 +54,7 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
   const [targetProfit, setTargetProfit] = useState("1")
   const [analysisTimeMinutes, setAnalysisTimeMinutes] = useState("30")
   const [ticksForEntry, setTicksForEntry] = useState("36000")
-  const [strategies] = useState<string[]>(["Even/Odd", "Over 3/Under 6", "Over 2/Under 7", "Differs Pro"])
+  const [strategies] = useState<string[]>(["Even/Odd", "Over 3/Under 6", "Over 2/Under 7", "Differs"])
   const [selectedStrategy, setSelectedStrategy] = useState("Even/Odd")
   const strategiesRef = useRef<TradingStrategies>(new TradingStrategies())
 
@@ -67,13 +62,10 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
     "Even/Odd": 2.0,
     "Over 3/Under 6": 2.6,
     "Over 2/Under 7": 3.5,
-    "Differs Pro": 2.2,
+    Differs: 2.3,
   })
 
   const [ticksPerTrade, setTicksPerTrade] = useState<number>(5)
-
-  const [autoRestartEnabled, setAutoRestartEnabled] = useState(true)
-  const [restartDelaySeconds, setRestartDelaySeconds] = useState(2)
 
   // Trading state
   const [isRunning, setIsRunning] = useState(false)
@@ -86,7 +78,6 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
 
   const [marketPrice, setMarketPrice] = useState<number | null>(null)
   const [lastDigit, setLastDigit] = useState<number | null>(null)
-  const [lastDigits, setLastDigits] = useState<number[]>([])
 
   // Analysis data
   const [digitFrequencies, setDigitFrequencies] = useState<number[]>(Array(10).fill(0))
@@ -94,6 +85,11 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
   const [ticksCollected, setTicksCollected] = useState(0)
   const [analysisData, setAnalysisData] = useState<any>(null)
   const [showAnalysisResults, setShowAnalysisResults] = useState(false)
+
+  const [differsWaitTicks, setDiffersWaitTicks] = useState(0)
+  const [differsSelectedDigit, setDiffersSelectedDigit] = useState<number | null>(null)
+  const [differsWaitingForEntry, setDiffersWaitingForEntry] = useState(false)
+  const [differsTicksSinceAppearance, setDiffersTicksSinceAppearance] = useState(0)
 
   const [stats, setStats] = useState<BotStats>({
     totalWins: 0,
@@ -122,55 +118,23 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
   const [resultType, setResultType] = useState<"tp" | "sl">("tp")
   const [resultAmount, setResultAmount] = useState(0)
 
-  const [differsProState, setDiffersProState] = useState<{
-    selectedDigit: number | null
-    digitAppeared: boolean
-    ticksAfterAppearance: number
-    isPaused: boolean
-  }>({
-    selectedDigit: null,
-    digitAppeared: false,
-    ticksAfterAppearance: 0,
-    isPaused: false,
-  })
-
-  const engineRef = useRef<CleanTradeEngine | null>(null)
-
-  const [isTradeActive, setIsTradeActive] = useState(false)
-  const [shouldStopTrading, setShouldStopTrading] = useState(false)
-
-  // State for Differs strategy entry condition
-  const [differsSelectedDigit, setDiffersSelectedDigit] = useState<number | null>(null)
-  const [differsWaitingForEntry, setDiffersWaitingForEntry] = useState(false)
-  const [differsTicksSinceAppearance, setDiffersTicksSinceAppearance] = useState(0)
-
   useEffect(() => {
     if (!apiClient || !isConnected || !isAuthorized) return
 
-    let isSubscribed = true
     const loadMarkets = async () => {
       try {
-        if (!isSubscribed) return
         setLoadingMarkets(true)
         const symbols = await apiClient.getActiveSymbols()
-        if (isSubscribed) {
-          setAllMarkets(symbols)
-          console.log("[v0] SmartAuto24: Loaded all markets:", symbols.length)
-        }
+        setAllMarkets(symbols)
+        console.log("[v0] Loaded all markets:", symbols.length)
       } catch (error) {
-        console.error("[v0] SmartAuto24: Failed to load markets:", error)
+        console.error("[v0] Failed to load markets:", error)
       } finally {
-        if (isSubscribed) {
-          setLoadingMarkets(false)
-        }
+        setLoadingMarkets(false)
       }
     }
 
     loadMarkets()
-
-    return () => {
-      isSubscribed = false
-    }
   }, [apiClient, isConnected, isAuthorized])
 
   useEffect(() => {
@@ -185,34 +149,31 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
           const digit = Math.floor(tick.quote * 10) % 10
           setLastDigit(digit)
 
-          // Update state only if isRunning is true, to avoid unnecessary re-renders during analysis
-          if (isRunning) {
-            setDigitFrequencies((prev) => {
-              const newFreq = [...prev]
-              newFreq[digit]++
-              return newFreq
-            })
+          // Update digit frequencies
+          setDigitFrequencies((prev) => {
+            const newFreq = [...prev]
+            newFreq[digit]++
+            return newFreq
+          })
 
-            setOverUnderAnalysis((prev) => {
-              const isOver = digit >= 5
-              return {
-                over: prev.over + (isOver ? 1 : 0),
-                under: prev.under + (isOver ? 0 : 1),
-                total: prev.total + 1,
-              }
-            })
+          // Update over/under
+          setOverUnderAnalysis((prev) => {
+            const isOver = digit >= 5
+            return {
+              over: prev.over + (isOver ? 1 : 0),
+              under: prev.under + (isOver ? 0 : 1),
+              total: prev.total + 1,
+            }
+          })
 
-            setTicksCollected((prev) => prev + 1)
-            setLastDigits((prev) => [...prev, digit].slice(-20))
+          setTicksCollected((prev) => prev + 1)
 
-            // Handle Differs strategy entry condition
-            if (selectedStrategy === "Differs Pro" && differsSelectedDigit !== null && !differsWaitingForEntry) {
-              if (digit === differsSelectedDigit) {
-                setDiffersWaitingForEntry(true)
-                setDiffersTicksSinceAppearance(0)
-                addAnalysisLog(`🎯 Digit ${differsSelectedDigit} appeared! Monitoring next 3 ticks...`, "info")
-              }
-            } else if (selectedStrategy === "Differs Pro" && differsWaitingForEntry) {
+          if (differsWaitingForEntry && differsSelectedDigit !== null) {
+            if (digit === differsSelectedDigit) {
+              // Reset if selected digit appears
+              setDiffersTicksSinceAppearance(0)
+            } else {
+              // Increment ticks since appearance
               setDiffersTicksSinceAppearance((prev) => prev + 1)
             }
           }
@@ -229,7 +190,7 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
         apiClient.forget(tickSubscriptionId).catch((err) => console.log("[v0] Forget error:", err))
       }
     }
-  }, [apiClient, isConnected, market, isRunning, selectedStrategy, differsSelectedDigit, differsWaitingForEntry])
+  }, [apiClient, isConnected, market, differsWaitingForEntry, differsSelectedDigit])
 
   useEffect(() => {
     const savedToken = localStorage.getItem("deriv_api_token_smartauto24")
@@ -280,23 +241,17 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
     setDigitFrequencies(Array(10).fill(0))
     setOverUnderAnalysis({ over: 0, under: 0, total: 0 })
     setTicksCollected(0)
-    setLastDigits([])
-    setDiffersProState({
-      selectedDigit: null,
-      digitAppeared: false,
-      ticksAfterAppearance: 0,
-      isPaused: false,
-    })
-
-    // Reset Differs specific states
+    // Reset Differs strategy state
     setDiffersSelectedDigit(null)
     setDiffersWaitingForEntry(false)
     setDiffersTicksSinceAppearance(0)
 
     addAnalysisLog(`Starting ${analysisTimeMinutes} minute analysis on ${market}...`, "info")
 
+    // Initialize trader
     traderRef.current = new DerivRealTrader(apiClient)
 
+    // Start timer
     const analysisSeconds = Number.parseInt(analysisTimeMinutes) * 60
     let secondsElapsed = 0
 
@@ -312,77 +267,9 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
     }, 1000)
   }
 
-  const analyzeDiffersPro = (recentDigits: number[]): any => {
-    const digitCounts: number[] = Array(10).fill(0)
-    recentDigits.forEach((digit) => digitCounts[digit]++)
-
-    const totalDigits = recentDigits.length
-    const digitPercentages = digitCounts.map((count) => (count / totalDigits) * 100)
-
-    const mostAppearing = digitPercentages.indexOf(Math.max(...digitPercentages))
-    const leastAppearing = digitPercentages.indexOf(Math.min(...digitPercentages))
-
-    const validDigits: number[] = []
-
-    for (let digit = 2; digit <= 7; digit++) {
-      if (digit === mostAppearing || digit === leastAppearing) continue
-      if (digitPercentages[digit] >= 10) continue
-
-      const last10 = recentDigits.slice(-10).filter((d) => d === digit).length
-      const last20 = recentDigits.slice(-20).filter((d) => d === digit).length
-
-      const percent10 = (last10 / Math.min(10, recentDigits.length)) * 100
-      const percent20 = (last20 / Math.min(20, recentDigits.length)) * 100
-
-      if (percent10 < percent20) {
-        validDigits.push(digit)
-      }
-    }
-
-    if (validDigits.length === 0) {
-      return {
-        power: 0,
-        signal: null,
-        confidence: 0,
-        description:
-          "No valid Differs Pro digits found (need digits 2-7, not most/least appearing, <10% power, decreasing)",
-        targetDigit: null,
-      }
-    }
-
-    const selectedDigit = validDigits.reduce((best, digit) =>
-      digitPercentages[digit] < digitPercentages[best] ? digit : best,
-    )
-
-    const power = 100 - digitPercentages[selectedDigit]
-
-    return {
-      power,
-      signal: "DIFFERS",
-      confidence: power,
-      description: `Differs Pro: Target digit ${selectedDigit} (${digitPercentages[selectedDigit].toFixed(1)}% power, decreasing)`,
-      targetDigit: selectedDigit,
-    }
-  }
-
   const completeAnalysis = async () => {
     setStatus("trading")
     addAnalysisLog("Analysis complete! Analyzing with selected strategy...", "success")
-
-    const isVolatilityIndex = market.startsWith("R_") || market.startsWith("1HZ")
-    const requiresVolatilityIndex = ["Even/Odd", "Over 3/Under 6", "Over 2/Under 7", "Differs Pro"].includes(
-      selectedStrategy,
-    )
-
-    if (requiresVolatilityIndex && !isVolatilityIndex) {
-      addAnalysisLog(
-        `❌ Error: ${selectedStrategy} strategy requires a volatility index (R_10, R_25, R_50, etc.). Current market: ${market}`,
-        "warning",
-      )
-      setIsRunning(false)
-      setStatus("idle")
-      return
-    }
 
     const recentDigits: number[] = []
     for (let i = 0; i < 10; i++) {
@@ -392,14 +279,20 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
     }
 
     let analysis: any = null
-    if (selectedStrategy === "Even/Odd") {
+    if (selectedStrategy === "Differs") {
+      analysis = await analyzeDiffersStrategy(recentDigits)
+      if (!analysis) {
+        addAnalysisLog("Differs strategy: No suitable digit found. Stopping.", "warning")
+        setIsRunning(false)
+        setStatus("idle")
+        return
+      }
+    } else if (selectedStrategy === "Even/Odd") {
       analysis = strategiesRef.current!.analyzeEvenOdd(recentDigits)
     } else if (selectedStrategy === "Over 3/Under 6") {
       analysis = strategiesRef.current!.analyzeOver3Under6(recentDigits)
     } else if (selectedStrategy === "Over 2/Under 7") {
       analysis = strategiesRef.current!.analyzeOver2Under7(recentDigits)
-    } else if (selectedStrategy === "Differs Pro") {
-      analysis = analyzeDiffersPro(recentDigits)
     }
 
     setAnalysisData({
@@ -410,6 +303,7 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
       description: analysis.description,
       digitFrequencies,
       ticksCollected,
+      differsDigit: selectedStrategy === "Differs" ? differsSelectedDigit : undefined,
     })
     setShowAnalysisResults(true)
 
@@ -422,20 +316,18 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
 
     addAnalysisLog(`${selectedStrategy} Power: ${analysis.power.toFixed(1)}% - Signal: ${analysis.signal}`, "success")
 
-    if (selectedStrategy === "Differs Pro" && analysis.targetDigit !== null) {
-      setDiffersSelectedDigit(analysis.targetDigit) // Set the digit to monitor
+    if (selectedStrategy === "Differs" && differsSelectedDigit !== null) {
       setDiffersWaitingForEntry(true)
       setDiffersTicksSinceAppearance(0)
-      addAnalysisLog(`Waiting for digit ${analysis.targetDigit} to appear, then watching next 3 ticks...`, "info")
+      addAnalysisLog(`Waiting for digit ${differsSelectedDigit} to appear, then watching next 3 ticks...`, "info")
 
-      // This interval will continuously check the condition
+      // Monitor for entry condition
       const checkEntryInterval = setInterval(() => {
-        // This condition is checked on every tick due to useEffect and marketPrice update
         if (differsTicksSinceAppearance >= 3) {
           clearInterval(checkEntryInterval)
           setDiffersWaitingForEntry(false)
           addAnalysisLog(
-            `Entry condition met! Digit ${analysis.targetDigit} didn't appear in 3 ticks. Starting trades.`,
+            `Entry condition met! Digit ${differsSelectedDigit} didn't appear in 3 ticks. Starting trades.`,
             "success",
           )
           startDiffersTrades(analysis)
@@ -445,33 +337,96 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
       return
     }
 
+    // Execute trades for other strategies
+    executeTrades(analysis)
+  }
+
+  const analyzeDiffersStrategy = async (recentDigits: number[]) => {
+    const total = recentDigits.length
+    const frequencies = Array(10).fill(0)
+
+    recentDigits.forEach((d) => frequencies[d]++)
+
+    // Calculate percentages
+    const percentages = frequencies.map((f) => (f / total) * 100)
+
+    // Find most and least appearing
+    const maxFreq = Math.max(...frequencies)
+    const minFreq = Math.min(...frequencies)
+    const mostAppearing = frequencies.indexOf(maxFreq)
+    const leastAppearing = frequencies.indexOf(minFreq)
+
+    // Find suitable digit (2-7, not most/least, <10% power, decreasing)
+    let selectedDigit: number | null = null
+    let selectedPower = 0
+
+    for (let digit = 2; digit <= 7; digit++) {
+      const power = percentages[digit]
+
+      // Skip if most or least appearing
+      if (digit === mostAppearing || digit === leastAppearing) continue
+
+      // Must have less than 10% power
+      if (power >= 10) continue
+
+      // Check if decreasing (compare last 20% of data vs first 80%)
+      const splitPoint = Math.floor(recentDigits.length * 0.8)
+      const firstPart = recentDigits.slice(0, splitPoint).filter((d) => d === digit).length
+      const lastPart = recentDigits.slice(splitPoint).filter((d) => d === digit).length
+
+      const firstPartPercent = (firstPart / splitPoint) * 100
+      const lastPartPercent = (lastPart / (recentDigits.length - splitPoint)) * 100
+
+      // Must be decreasing (last part < first part)
+      if (lastPartPercent >= firstPartPercent) continue
+
+      // Found suitable digit
+      selectedDigit = digit
+      selectedPower = power
+      break
+    }
+
+    if (selectedDigit === null) {
+      return null
+    }
+
+    setDiffersSelectedDigit(selectedDigit)
+
+    addAnalysisLog(
+      `Selected digit ${selectedDigit} with ${selectedPower.toFixed(1)}% power (decreasing trend)`,
+      "success",
+    )
+
+    return {
+      signal: "DIFFERS",
+      power: 100 - selectedPower, // Invert power (lower frequency = higher power for differs)
+      confidence: 75,
+      description: `Differs strategy targeting digit ${selectedDigit} with ${selectedPower.toFixed(1)}% appearance rate (decreasing).`,
+    }
+  }
+
+  const startDiffersTrades = (analysis: any) => {
     executeTrades(analysis)
   }
 
   const executeTrades = (analysis: any) => {
-    setIsTradeActive(false)
-    setShouldStopTrading(false)
     let tradesExecuted = 0
 
     analysisIntervalRef.current = setInterval(async () => {
-      if (isTradeActive || shouldStopTrading || !traderRef.current) {
-        if (shouldStopTrading) {
-          clearInterval(analysisIntervalRef.current!)
-          setStatus("completed")
-          addAnalysisLog("Trading stopped.", "info")
-          setIsRunning(false)
-        }
+      if (!traderRef.current) {
+        clearInterval(analysisIntervalRef.current!)
+        setStatus("completed")
+        addAnalysisLog("Trading stopped.", "info")
+        setIsRunning(false)
         return
       }
-
-      setIsTradeActive(true)
 
       try {
         let contractType: string
         let barrier: string | undefined = undefined
 
-        if (selectedStrategy === "Differs Pro" && differsSelectedDigit !== null) {
-          contractType = "DIGITMATCH" // Use DIGITMATCH for Differs Pro
+        if (selectedStrategy === "Differs" && differsSelectedDigit !== null) {
+          contractType = "DIGITDIFF"
           barrier = differsSelectedDigit.toString()
         } else if (selectedStrategy === "Even/Odd") {
           contractType = analysis.signal === "EVEN" ? "DIGITEVEN" : "DIGITODD"
@@ -498,12 +453,12 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
         const martingaleMultiplier = martingaleRatios[selectedStrategy] || 2.0
         const baseStake = Number.parseFloat(stake)
         const martingaleStake =
-          tradesExecuted > 0 ? baseStake * Math.pow(martingaleMultiplier, tradesExecuted) : baseStake
+          tradesExecuted > 0 ? baseStake * Math.pow(martingaleMultiplier, tradesExecuted - 1) : baseStake
 
         const adjustedStake = Math.round(martingaleStake * 100) / 100
 
         addAnalysisLog(
-          `Tick ${ticksCollected}: ${marketPrice?.toFixed(5)} (Digit: ${lastDigit}) - Executing trade...`,
+          `Tick ${tradesExecuted + 1}: ${marketPrice?.toFixed(5)} (Digit: ${lastDigit}) - Executing trade...`,
           "info",
         )
 
@@ -521,15 +476,12 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
 
         console.log(`[v0] Executing trade with config:`, tradeConfig)
 
-        // Use the new executeTrade method from DerivRealTrader
         const result = await traderRef.current!.executeTrade(tradeConfig)
 
         if (result) {
           tradesExecuted++
-          // Use getTotalProfit from DerivRealTrader to accurately track session profit
-          const newProfit = traderRef.current!.getTotalProfit()
           setSessionTrades(tradesExecuted)
-          setSessionProfit(newProfit)
+          setSessionProfit(traderRef.current!.getTotalProfit())
 
           setStats((prev) => {
             const newStats = { ...prev }
@@ -541,14 +493,13 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
               newStats.totalWins++
               newStats.contractsWon++
               newStats.totalProfit += result.profit || 0
-              tradesExecuted = 0
             } else {
               newStats.totalLosses++
               newStats.contractsLost++
-              newStats.totalProfit -= adjustedStake // Subtract stake for loss
+              newStats.totalProfit -= adjustedStake
             }
 
-            newStats.winRate = newStats.numberOfRuns > 0 ? (newStats.totalWins / newStats.numberOfRuns) * 100 : 0
+            newStats.winRate = (newStats.totalWins / newStats.numberOfRuns) * 100
 
             return newStats
           })
@@ -556,7 +507,7 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
           setTradeHistory((prev) => [
             {
               id: result.contractId?.toString() || `trade-${Date.now()}`,
-              contractType: selectedStrategy === "Differs Pro" ? `DIGITMATCH ${differsSelectedDigit}` : contractType,
+              contractType: selectedStrategy === "Differs" ? `DIFFERS ${differsSelectedDigit}` : contractType,
               market,
               entrySpot: result.entrySpot?.toString() || "N/A",
               exitSpot: result.exitSpot?.toString() || "N/A",
@@ -583,88 +534,29 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
             result.isWin ? "success" : "warning",
           )
 
-          if (newProfit >= Number.parseFloat(targetProfit)) {
+          if (traderRef.current!.getTotalProfit() >= Number.parseFloat(targetProfit)) {
             setResultType("tp")
-            setResultAmount(newProfit)
+            setResultAmount(traderRef.current!.getTotalProfit())
             setShowResultModal(true)
-            setShouldStopTrading(true)
             clearInterval(analysisIntervalRef.current!)
             setIsRunning(false)
             setStatus("completed")
             addAnalysisLog("Take Profit hit! Session complete.", "success")
-            setIsTradeActive(false)
-            return
-          }
-
-          if (newProfit <= -(baseStake * 10)) {
-            setResultType("sl")
-            setResultAmount(Math.abs(newProfit))
-            setShowResultModal(true)
-            setShouldStopTrading(true)
-            clearInterval(analysisIntervalRef.current!)
-            setIsRunning(false)
-            setStatus("completed")
-            addAnalysisLog("Stop Loss hit! Session complete.", "warning")
-            setIsTradeActive(false)
-            return
           }
         }
-
-        setIsTradeActive(false)
       } catch (error: any) {
         console.error("[v0] Trade execution error:", error)
         addAnalysisLog(`Trade error: ${error.message}`, "warning")
-        setIsTradeActive(false)
       }
-    }, 3000) // Execute trades every 3 seconds
-  }
-
-  const startDiffersTrades = (analysis: any) => {
-    executeTrades(analysis)
+    }, 3000) // 3 second interval between trades
   }
 
   const handleStopTrading = () => {
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
     if (analysisIntervalRef.current) clearInterval(analysisIntervalRef.current)
-    setShouldStopTrading(true)
     setIsRunning(false)
     setStatus("idle")
     addAnalysisLog("Trading stopped", "info")
-  }
-
-  const handleClear = () => {
-    // Stop any running trades
-    handleStopTrading()
-
-    // Reset all state
-    setStats({
-      totalWins: 0,
-      totalLosses: 0,
-      totalProfit: 0,
-      winRate: 0,
-      totalStake: 0,
-      totalPayout: 0,
-      numberOfRuns: 0,
-      contractsLost: 0,
-      contractsWon: 0,
-    })
-    setTradeHistory([])
-    setJournalLog([])
-    setSessionProfit(0)
-    setSessionTrades(0)
-    setAnalysisLog([])
-    setAnalysisData(null)
-    setShowAnalysisResults(false)
-    setDigitFrequencies(Array(10).fill(0))
-    setOverUnderAnalysis({ over: 0, under: 0, total: 0 })
-    setTicksCollected(0)
-    setIsTradeActive(false)
-    setShouldStopTrading(false)
-    setDiffersSelectedDigit(null)
-    setDiffersWaitingForEntry(false)
-    setDiffersTicksSinceAppearance(0)
-
-    addAnalysisLog("All data cleared and reset.", "info")
   }
 
   return (
@@ -860,16 +752,17 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
 
               <div
                 className={`p-4 rounded-lg ${
-                  theme === "dark" ? "bg-gray-900/50 border border-gray-700" : "bg-gray-900 border border-gray-800"
+                  theme === "dark" ? "bg-gray-900/50 border border-gray-700" : "bg-gray-100 border border-gray-300"
                 }`}
               >
-                <p className={`text-sm ${theme === "dark" ? "text-gray-300" : "text-gray-300"}`}>
+                <p className={`text-sm ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}>
                   {analysisData.description}
                 </p>
               </div>
             </Card>
           )}
 
+          {/* Configuration Panel */}
           <Card
             className={`p-6 border ${
               theme === "dark"
@@ -1057,60 +950,6 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
                   max="100"
                 />
               </div>
-
-              <div className="col-span-2">
-                <div
-                  className={`p-4 rounded-lg border flex items-center justify-between ${
-                    theme === "dark" ? "bg-blue-500/10 border-blue-500/30" : "bg-blue-50 border-blue-200"
-                  }`}
-                >
-                  <div>
-                    <label
-                      className={`block text-sm font-medium ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}
-                    >
-                      Auto-Restart After Trade
-                    </label>
-                    <p className={`text-xs mt-1 ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
-                      Automatically place next trade after current trade closes
-                    </p>
-                  </div>
-                  <Button
-                    onClick={() => setAutoRestartEnabled(!autoRestartEnabled)}
-                    variant={autoRestartEnabled ? "default" : "outline"}
-                    className={
-                      autoRestartEnabled
-                        ? "bg-green-500 hover:bg-green-600 text-white"
-                        : theme === "dark"
-                          ? "border-gray-600 text-gray-400"
-                          : "border-gray-300 text-gray-600"
-                    }
-                  >
-                    {autoRestartEnabled ? "ENABLED" : "DISABLED"}
-                  </Button>
-                </div>
-              </div>
-
-              {autoRestartEnabled && (
-                <div>
-                  <label
-                    className={`block text-sm font-medium mb-2 ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}
-                  >
-                    Restart Delay (seconds)
-                  </label>
-                  <Input
-                    type="number"
-                    value={restartDelaySeconds}
-                    onChange={(e) => setRestartDelaySeconds(Number.parseInt(e.target.value) || 2)}
-                    className={`${
-                      theme === "dark"
-                        ? "bg-[#0a0e27]/50 border-yellow-500/30 text-white"
-                        : "bg-white border-gray-300 text-gray-900"
-                    }`}
-                    min="1"
-                    max="10"
-                  />
-                </div>
-              )}
             </div>
 
             <div className="flex gap-3">
@@ -1136,17 +975,10 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
                 <Pause className="w-4 h-4 mr-2" />
                 Stop
               </Button>
-
-              <Button
-                onClick={handleClear}
-                variant="outline"
-                className={`flex-1 ${theme === "dark" ? "border-gray-600 text-gray-400 hover:bg-gray-800" : "border-gray-300 text-gray-600 hover:bg-gray-100"}`}
-              >
-                Clear
-              </Button>
             </div>
           </Card>
 
+          {/* Analysis Progress */}
           {status === "analyzing" && (
             <Card
               className={`p-6 border ${
@@ -1178,6 +1010,7 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
                 </div>
               </div>
 
+              {/* Analysis Log */}
               <div
                 className={`p-4 rounded-lg ${
                   theme === "dark" ? "bg-gray-900/50 border border-gray-700" : "bg-gray-900 border border-gray-800"
@@ -1210,19 +1043,40 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
             </Card>
           )}
 
-          <TradingStatsPanel stats={stats} theme={theme} onReset={handleClear} />
+          {/* Stats Panel */}
+          <TradingStatsPanel
+            stats={stats}
+            theme={theme}
+            onReset={() => {
+              setStats({
+                totalWins: 0,
+                totalLosses: 0,
+                totalProfit: 0,
+                winRate: 0,
+                totalStake: 0,
+                totalPayout: 0,
+                numberOfRuns: 0,
+                contractsLost: 0,
+                contractsWon: 0,
+              })
+              setTradeHistory([])
+              setJournalLog([])
+            }}
+          />
 
+          {/* Transaction History */}
           {tradeHistory.length > 0 && <TransactionHistory transactions={tradeHistory} theme={theme} />}
 
+          {/* Trade Log */}
           {tradeHistory.length > 0 && (
             <TradeLog
               trades={tradeHistory.map((trade) => ({
                 id: trade.id,
                 timestamp: trade.timestamp,
-                volume: "1", // Placeholder, adjust if needed
-                tradeType: selectedStrategy, // Use selectedStrategy as tradeType
+                volume: "1",
+                tradeType: selectedStrategy,
                 contractType: trade.contractType,
-                predicted: analysisData?.signal || "N/A", // Display predicted signal
+                predicted: analysisData?.signal || "N/A",
                 result: trade.status,
                 entry: trade.entrySpot,
                 exit: trade.exitSpot,
@@ -1233,38 +1087,28 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
             />
           )}
 
+          {/* Journal */}
           {journalLog.length > 0 && <TradingJournalPanel entries={journalLog} theme={theme} />}
 
+          {/* Session Stats */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div
-              className={`p-6 border rounded-lg ${
-                sessionProfit >= 0
-                  ? theme === "dark"
-                    ? "bg-gradient-to-br from-green-500/10 to-green-500/10 border-green-500/30"
-                    : "bg-green-50 border-green-200"
-                  : theme === "dark"
-                    ? "bg-gradient-to-br from-red-500/10 to-red-500/10 border-red-500/30"
-                    : "bg-red-50 border-red-200"
+            <Card
+              className={`p-6 border ${
+                theme === "dark"
+                  ? "bg-gradient-to-br from-green-500/10 to-green-500/10 border-green-500/30"
+                  : "bg-green-50 border-green-200"
               }`}
             >
-              <div className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Session P&L</div>
+              <div className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Session Profit</div>
               <div
-                className={`text-3xl font-bold flex items-center gap-2 ${
-                  sessionProfit >= 0
-                    ? theme === "dark"
-                      ? "text-green-400"
-                      : "text-green-600"
-                    : theme === "dark"
-                      ? "text-red-400"
-                      : "text-red-600"
-                }`}
+                className={`text-3xl font-bold ${sessionProfit >= 0 ? (theme === "dark" ? "text-green-400" : "text-green-600") : theme === "dark" ? "text-red-400" : "text-red-600"}`}
               >
-                {sessionProfit >= 0 ? "+" : "-"}${Math.abs(sessionProfit).toFixed(2)}
+                {sessionProfit >= 0 ? "+" : ""} ${sessionProfit.toFixed(2)}
               </div>
-            </div>
+            </Card>
 
-            <div
-              className={`p-6 border rounded-lg ${
+            <Card
+              className={`p-6 border ${
                 theme === "dark"
                   ? "bg-gradient-to-br from-blue-500/10 to-blue-500/10 border-blue-500/30"
                   : "bg-blue-50 border-blue-200"
@@ -1274,10 +1118,10 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
               <div className={`text-3xl font-bold ${theme === "dark" ? "text-blue-400" : "text-blue-600"}`}>
                 {sessionTrades}
               </div>
-            </div>
+            </Card>
 
-            <div
-              className={`p-6 border rounded-lg ${
+            <Card
+              className={`p-6 border ${
                 theme === "dark"
                   ? "bg-gradient-to-br from-yellow-500/10 to-yellow-500/10 border-yellow-500/30"
                   : "bg-yellow-50 border-yellow-200"
@@ -1287,7 +1131,7 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
               <div className={`text-lg font-bold ${theme === "dark" ? "text-yellow-400" : "text-yellow-600"}`}>
                 {status.toUpperCase()}
               </div>
-            </div>
+            </Card>
           </div>
         </>
       )}
