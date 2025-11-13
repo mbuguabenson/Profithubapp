@@ -17,7 +17,12 @@ import { TradingStrategies } from "@/lib/trading-strategies"
 import { TradingStatsPanel } from "@/components/trading-stats-panel"
 import { TransactionHistory } from "@/components/transaction-history"
 import { TradingJournalPanel } from "@/components/trading-journal-panel"
-import { CleanTradeEngine } from "@/lib/clean-trade-engine"
+import { TradeLog } from "@/components/trade-log"
+
+// Define CleanTradeEngine if it's not imported
+// For demonstration purposes, assuming it's a placeholder
+// In a real scenario, ensure this type is correctly imported or defined.
+type CleanTradeEngine = {}
 
 interface AnalysisLogEntry {
   timestamp: Date
@@ -131,6 +136,14 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
 
   const engineRef = useRef<CleanTradeEngine | null>(null)
 
+  const [isTradeActive, setIsTradeActive] = useState(false)
+  const [shouldStopTrading, setShouldStopTrading] = useState(false)
+
+  // State for Differs strategy entry condition
+  const [differsSelectedDigit, setDiffersSelectedDigit] = useState<number | null>(null)
+  const [differsWaitingForEntry, setDiffersWaitingForEntry] = useState(false)
+  const [differsTicksSinceAppearance, setDiffersTicksSinceAppearance] = useState(0)
+
   useEffect(() => {
     if (!apiClient || !isConnected || !isAuthorized) return
 
@@ -172,23 +185,37 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
           const digit = Math.floor(tick.quote * 10) % 10
           setLastDigit(digit)
 
-          setDigitFrequencies((prev) => {
-            const newFreq = [...prev]
-            newFreq[digit]++
-            return newFreq
-          })
+          // Update state only if isRunning is true, to avoid unnecessary re-renders during analysis
+          if (isRunning) {
+            setDigitFrequencies((prev) => {
+              const newFreq = [...prev]
+              newFreq[digit]++
+              return newFreq
+            })
 
-          setOverUnderAnalysis((prev) => {
-            const isOver = digit >= 5
-            return {
-              over: prev.over + (isOver ? 1 : 0),
-              under: prev.under + (isOver ? 0 : 1),
-              total: prev.total + 1,
+            setOverUnderAnalysis((prev) => {
+              const isOver = digit >= 5
+              return {
+                over: prev.over + (isOver ? 1 : 0),
+                under: prev.under + (isOver ? 0 : 1),
+                total: prev.total + 1,
+              }
+            })
+
+            setTicksCollected((prev) => prev + 1)
+            setLastDigits((prev) => [...prev, digit].slice(-20))
+
+            // Handle Differs strategy entry condition
+            if (selectedStrategy === "Differs Pro" && differsSelectedDigit !== null && !differsWaitingForEntry) {
+              if (digit === differsSelectedDigit) {
+                setDiffersWaitingForEntry(true)
+                setDiffersTicksSinceAppearance(0)
+                addAnalysisLog(`🎯 Digit ${differsSelectedDigit} appeared! Monitoring next 3 ticks...`, "info")
+              }
+            } else if (selectedStrategy === "Differs Pro" && differsWaitingForEntry) {
+              setDiffersTicksSinceAppearance((prev) => prev + 1)
             }
-          })
-
-          setTicksCollected((prev) => prev + 1)
-          setLastDigits((prev) => [...prev, digit].slice(-20))
+          }
         })
       } catch (error) {
         console.error("[v0] Failed to subscribe to ticks:", error)
@@ -202,7 +229,7 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
         apiClient.forget(tickSubscriptionId).catch((err) => console.log("[v0] Forget error:", err))
       }
     }
-  }, [apiClient, isConnected, market])
+  }, [apiClient, isConnected, market, isRunning, selectedStrategy, differsSelectedDigit, differsWaitingForEntry])
 
   useEffect(() => {
     const savedToken = localStorage.getItem("deriv_api_token_smartauto24")
@@ -260,6 +287,11 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
       ticksAfterAppearance: 0,
       isPaused: false,
     })
+
+    // Reset Differs specific states
+    setDiffersSelectedDigit(null)
+    setDiffersWaitingForEntry(false)
+    setDiffersTicksSinceAppearance(0)
 
     addAnalysisLog(`Starting ${analysisTimeMinutes} minute analysis on ${market}...`, "info")
 
@@ -335,7 +367,7 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
 
   const completeAnalysis = async () => {
     setStatus("trading")
-    addAnalysisLog("Analysis complete! Starting trade execution...", "success")
+    addAnalysisLog("Analysis complete! Analyzing with selected strategy...", "success")
 
     const isVolatilityIndex = market.startsWith("R_") || market.startsWith("1HZ")
     const requiresVolatilityIndex = ["Even/Odd", "Over 3/Under 6", "Over 2/Under 7", "Differs Pro"].includes(
@@ -382,313 +414,257 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
     setShowAnalysisResults(true)
 
     if (!analysis.signal) {
-      addAnalysisLog(`Power ${analysis.power.toFixed(1)}% below threshold. Stopping.`, "warning")
+      addAnalysisLog(`Power ${analysis.power.toFixed(1)}% below 55% threshold. Stopping.`, "warning")
       setIsRunning(false)
       setStatus("idle")
       return
     }
 
     addAnalysisLog(`${selectedStrategy} Power: ${analysis.power.toFixed(1)}% - Signal: ${analysis.signal}`, "success")
-    addAnalysisLog(`🤖 Starting automated trading...`, "info")
-
-    if (!apiClient) {
-      addAnalysisLog("❌ API client not available", "warning")
-      setIsRunning(false)
-      setStatus("idle")
-      return
-    }
-
-    engineRef.current = new CleanTradeEngine(apiClient)
 
     if (selectedStrategy === "Differs Pro" && analysis.targetDigit !== null) {
-      addAnalysisLog(`🎯 Starting Differs Pro monitoring for digit ${analysis.targetDigit}`, "info")
-      await startDiffersProTrading(analysis.targetDigit)
+      setDiffersSelectedDigit(analysis.targetDigit) // Set the digit to monitor
+      setDiffersWaitingForEntry(true)
+      setDiffersTicksSinceAppearance(0)
+      addAnalysisLog(`Waiting for digit ${analysis.targetDigit} to appear, then watching next 3 ticks...`, "info")
+
+      // This interval will continuously check the condition
+      const checkEntryInterval = setInterval(() => {
+        // This condition is checked on every tick due to useEffect and marketPrice update
+        if (differsTicksSinceAppearance >= 3) {
+          clearInterval(checkEntryInterval)
+          setDiffersWaitingForEntry(false)
+          addAnalysisLog(
+            `Entry condition met! Digit ${analysis.targetDigit} didn't appear in 3 ticks. Starting trades.`,
+            "success",
+          )
+          startDiffersTrades(analysis)
+        }
+      }, 1000)
+
       return
     }
 
-    await startStandardTradingLoop(analysis)
+    executeTrades(analysis)
   }
 
-  const startStandardTradingLoop = async (analysis: any) => {
+  const executeTrades = (analysis: any) => {
+    setIsTradeActive(false)
+    setShouldStopTrading(false)
     let tradesExecuted = 0
-    const martingaleMultiplier = martingaleRatios[selectedStrategy] || 2.0
-    const baseStake = Number.parseFloat(stake)
 
-    while (isRunning && engineRef.current) {
+    analysisIntervalRef.current = setInterval(async () => {
+      if (isTradeActive || shouldStopTrading || !traderRef.current) {
+        if (shouldStopTrading) {
+          clearInterval(analysisIntervalRef.current!)
+          setStatus("completed")
+          addAnalysisLog("Trading stopped.", "info")
+          setIsRunning(false)
+        }
+        return
+      }
+
+      setIsTradeActive(true)
+
       try {
-        const currentStake = tradesExecuted > 0 ? baseStake * Math.pow(martingaleMultiplier, tradesExecuted) : baseStake
+        let contractType: string
+        let barrier: string | undefined = undefined
 
-        const contractType = analysis.signal === "BUY" ? "CALL" : analysis.signal === "SELL" ? "PUT" : analysis.signal
+        if (selectedStrategy === "Differs Pro" && differsSelectedDigit !== null) {
+          contractType = "DIGITMATCH" // Use DIGITMATCH for Differs Pro
+          barrier = differsSelectedDigit.toString()
+        } else if (selectedStrategy === "Even/Odd") {
+          contractType = analysis.signal === "EVEN" ? "DIGITEVEN" : "DIGITODD"
+        } else if (selectedStrategy === "Over 3/Under 6") {
+          if (analysis.signal === "OVER" || analysis.signal.includes("OVER")) {
+            contractType = "DIGITOVER"
+            barrier = "3"
+          } else {
+            contractType = "DIGITUNDER"
+            barrier = "6"
+          }
+        } else if (selectedStrategy === "Over 2/Under 7") {
+          if (analysis.signal === "OVER" || analysis.signal.includes("OVER")) {
+            contractType = "DIGITOVER"
+            barrier = "2"
+          } else {
+            contractType = "DIGITUNDER"
+            barrier = "7"
+          }
+        } else {
+          contractType = analysis.signal === "BUY" ? "CALL" : "PUT"
+        }
+
+        const martingaleMultiplier = martingaleRatios[selectedStrategy] || 2.0
+        const baseStake = Number.parseFloat(stake)
+        const martingaleStake =
+          tradesExecuted > 0 ? baseStake * Math.pow(martingaleMultiplier, tradesExecuted) : baseStake
+
+        const adjustedStake = Math.round(martingaleStake * 100) / 100
 
         addAnalysisLog(
-          `⚡ Executing trade ${tradesExecuted + 1}: ${contractType} | Stake: $${currentStake.toFixed(2)}`,
+          `Tick ${ticksCollected}: ${marketPrice?.toFixed(5)} (Digit: ${lastDigit}) - Executing trade...`,
           "info",
         )
 
-        const result = await engineRef.current.execute({
+        const tradeConfig: any = {
           symbol: market,
-          contractType,
-          stake: currentStake,
+          contractType: contractType,
+          stake: adjustedStake.toFixed(2),
           duration: ticksPerTrade,
           durationUnit: "t",
-          currency: "USD",
-          barrier: analysis.targetDigit !== undefined ? analysis.targetDigit.toString() : undefined,
-        })
+        }
 
-        const newSessionProfit = sessionProfit + result.profit
-        setSessionProfit(newSessionProfit)
-        setSessionTrades((prev) => prev + 1)
+        if (barrier !== undefined) {
+          tradeConfig.barrier = barrier
+        }
 
-        setStats((prev) => {
-          const newStats = { ...prev }
-          newStats.numberOfRuns++
-          newStats.totalStake += currentStake
+        console.log(`[v0] Executing trade with config:`, tradeConfig)
 
-          if (result.win) {
-            newStats.totalWins++
-            newStats.contractsWon++
-            newStats.totalProfit += result.profit
-            newStats.totalPayout += result.payout
-            tradesExecuted = 0
-            addAnalysisLog(
-              `💰 WIN ✓ | Profit: +$${result.profit.toFixed(2)} | Total: +$${newSessionProfit.toFixed(2)}`,
-              "success",
-            )
-          } else {
-            newStats.totalLosses++
-            newStats.contractsLost++
-            newStats.totalProfit += result.profit
-            newStats.totalPayout += result.payout
-            tradesExecuted++
-            addAnalysisLog(
-              `💥 LOSS ✗ | Loss: -$${Math.abs(result.profit).toFixed(2)} | Total: ${newSessionProfit >= 0 ? "+" : ""}$${newSessionProfit.toFixed(2)}`,
-              "warning",
-            )
+        // Use the new executeTrade method from DerivRealTrader
+        const result = await traderRef.current!.executeTrade(tradeConfig)
+
+        if (result) {
+          tradesExecuted++
+          // Use getTotalProfit from DerivRealTrader to accurately track session profit
+          const newProfit = traderRef.current!.getTotalProfit()
+          setSessionTrades(tradesExecuted)
+          setSessionProfit(newProfit)
+
+          setStats((prev) => {
+            const newStats = { ...prev }
+            newStats.numberOfRuns++
+            newStats.totalStake += adjustedStake
+            newStats.totalPayout += result.payout || 0
+
+            if (result.isWin) {
+              newStats.totalWins++
+              newStats.contractsWon++
+              newStats.totalProfit += result.profit || 0
+              tradesExecuted = 0
+            } else {
+              newStats.totalLosses++
+              newStats.contractsLost++
+              newStats.totalProfit -= adjustedStake // Subtract stake for loss
+            }
+
+            newStats.winRate = newStats.numberOfRuns > 0 ? (newStats.totalWins / newStats.numberOfRuns) * 100 : 0
+
+            return newStats
+          })
+
+          setTradeHistory((prev) => [
+            {
+              id: result.contractId?.toString() || `trade-${Date.now()}`,
+              contractType: selectedStrategy === "Differs Pro" ? `DIGITMATCH ${differsSelectedDigit}` : contractType,
+              market,
+              entrySpot: result.entrySpot?.toString() || "N/A",
+              exitSpot: result.exitSpot?.toString() || "N/A",
+              buyPrice: adjustedStake,
+              profitLoss: result.profit || 0,
+              timestamp: Date.now(),
+              status: result.isWin ? "win" : "loss",
+            },
+            ...prev,
+          ])
+
+          journalRef.current!.addEntry({
+            type: "TRADE",
+            action: result.isWin ? "WIN" : "LOSS",
+            stake: adjustedStake,
+            profit: result.profit,
+            contractType: contractType,
+            market,
+            strategy: selectedStrategy,
+          })
+
+          addAnalysisLog(
+            `Trade ${tradesExecuted}: ${result.isWin ? "WIN" : "LOSS"} - P/L: $${(result.profit || 0).toFixed(2)} (Martingale: ${martingaleMultiplier.toFixed(1)}x)`,
+            result.isWin ? "success" : "warning",
+          )
+
+          if (newProfit >= Number.parseFloat(targetProfit)) {
+            setResultType("tp")
+            setResultAmount(newProfit)
+            setShowResultModal(true)
+            setShouldStopTrading(true)
+            clearInterval(analysisIntervalRef.current!)
+            setIsRunning(false)
+            setStatus("completed")
+            addAnalysisLog("Take Profit hit! Session complete.", "success")
+            setIsTradeActive(false)
+            return
           }
 
-          newStats.winRate = newStats.numberOfRuns > 0 ? (newStats.totalWins / newStats.numberOfRuns) * 100 : 0
-          return newStats
-        })
-
-        setTradeHistory((prev) => [
-          {
-            id: result.contractId || `trade-${Date.now()}`,
-            contractType: analysis.signal,
-            market,
-            entrySpot: result.entrySpot?.toString() || "N/A",
-            exitSpot: result.exitSpot?.toString() || "N/A",
-            buyPrice: currentStake,
-            profitLoss: result.profit,
-            timestamp: Date.now(),
-            status: result.win ? "win" : "loss",
-          },
-          ...prev,
-        ])
-
-        if (newSessionProfit >= Number.parseFloat(targetProfit)) {
-          setResultType("tp")
-          setResultAmount(newSessionProfit)
-          setShowResultModal(true)
-          setIsRunning(false)
-          setStatus("completed")
-          addAnalysisLog("🎉 TARGET PROFIT reached! Session complete.", "success")
-          break
+          if (newProfit <= -(baseStake * 10)) {
+            setResultType("sl")
+            setResultAmount(Math.abs(newProfit))
+            setShowResultModal(true)
+            setShouldStopTrading(true)
+            clearInterval(analysisIntervalRef.current!)
+            setIsRunning(false)
+            setStatus("completed")
+            addAnalysisLog("Stop Loss hit! Session complete.", "warning")
+            setIsTradeActive(false)
+            return
+          }
         }
 
-        if (newSessionProfit <= -(baseStake * 10)) {
-          setResultType("sl")
-          setResultAmount(Math.abs(newSessionProfit))
-          setShowResultModal(true)
-          setIsRunning(false)
-          setStatus("completed")
-          addAnalysisLog("⚠️ STOP LOSS hit! Session complete.", "warning")
-          break
-        }
-
-        if (autoRestartEnabled && isRunning) {
-          addAnalysisLog(`⏱️ Next trade in ${restartDelaySeconds}s...`, "info")
-          await new Promise((resolve) => setTimeout(resolve, restartDelaySeconds * 1000))
-        } else {
-          break
-        }
+        setIsTradeActive(false)
       } catch (error: any) {
         console.error("[v0] Trade execution error:", error)
-        addAnalysisLog(`❌ Trade error: ${error.message}`, "warning")
-
-        if (autoRestartEnabled && isRunning) {
-          addAnalysisLog("⏱️ Retrying in 5s...", "warning")
-          await new Promise((resolve) => setTimeout(resolve, 5000))
-        } else {
-          break
-        }
+        addAnalysisLog(`Trade error: ${error.message}`, "warning")
+        setIsTradeActive(false)
       }
-    }
-
-    if (isRunning) {
-      setIsRunning(false)
-      setStatus("completed")
-      addAnalysisLog("Trading session ended.", "info")
-    }
+    }, 3000) // Execute trades every 3 seconds
   }
 
-  const startDiffersProTrading = async (targetDigit: number) => {
-    let digitAppeared = false
-    let ticksAfterAppearance = 0
-    let tradesExecuted = 0
-    const martingaleMultiplier = martingaleRatios["Differs Pro"] || 2.2
-    const baseStake = Number.parseFloat(stake)
-
-    while (isRunning && engineRef.current) {
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      if (!isRunning) break
-
-      const currentDigit = lastDigit
-
-      if (currentDigit === targetDigit) {
-        if (!digitAppeared) {
-          digitAppeared = true
-          ticksAfterAppearance = 0
-          addAnalysisLog(`🎯 Digit ${targetDigit} appeared! Monitoring next 3 ticks...`, "info")
-        } else if (ticksAfterAppearance <= 3) {
-          addAnalysisLog(`⚠️ Digit ${targetDigit} appeared again. Resetting...`, "warning")
-          digitAppeared = false
-          ticksAfterAppearance = 0
-        }
-        continue
-      }
-
-      if (digitAppeared) {
-        ticksAfterAppearance++
-
-        if (ticksAfterAppearance >= 3) {
-          try {
-            const currentStake =
-              tradesExecuted > 0 ? baseStake * Math.pow(martingaleMultiplier, tradesExecuted) : baseStake
-
-            addAnalysisLog(
-              `⚡ Executing Differs trade: Digit ${targetDigit} | Stake: $${currentStake.toFixed(2)}`,
-              "info",
-            )
-
-            const result = await engineRef.current.execute({
-              symbol: market,
-              contractType: "DIGITMATCH",
-              stake: currentStake,
-              duration: ticksPerTrade,
-              durationUnit: "t",
-              currency: "USD",
-              barrier: targetDigit.toString(),
-            })
-
-            const newSessionProfit = sessionProfit + result.profit
-            setSessionProfit(newSessionProfit)
-            setSessionTrades((prev) => prev + 1)
-
-            setStats((prev) => {
-              const newStats = { ...prev }
-              newStats.numberOfRuns++
-              newStats.totalStake += currentStake
-
-              if (result.win) {
-                newStats.totalWins++
-                newStats.contractsWon++
-                newStats.totalProfit += result.profit
-                newStats.totalPayout += result.payout
-                tradesExecuted = 0
-                addAnalysisLog(
-                  `💰 WIN ✓ | Profit: +$${result.profit.toFixed(2)} | Total: +$${newSessionProfit.toFixed(2)}`,
-                  "success",
-                )
-              } else {
-                newStats.totalLosses++
-                newStats.contractsLost++
-                newStats.totalProfit += result.profit
-                newStats.totalPayout += result.payout
-                tradesExecuted++
-                addAnalysisLog(
-                  `💥 LOSS ✗ | Loss: -$${Math.abs(result.profit).toFixed(2)} | Total: ${newSessionProfit >= 0 ? "+" : ""}$${newSessionProfit.toFixed(2)}`,
-                  "warning",
-                )
-              }
-
-              newStats.winRate = newStats.numberOfRuns > 0 ? (newStats.totalWins / newStats.numberOfRuns) * 100 : 0
-              return newStats
-            })
-
-            setTradeHistory((prev) => [
-              {
-                id: result.contractId || `trade-${Date.now()}`,
-                contractType: `DIFFERS ${targetDigit}`,
-                market,
-                entrySpot: result.entrySpot?.toString() || "N/A",
-                exitSpot: result.exitSpot?.toString() || "N/A",
-                buyPrice: currentStake,
-                profitLoss: result.profit,
-                timestamp: Date.now(),
-                status: result.win ? "win" : "loss",
-              },
-              ...prev,
-            ])
-
-            if (newSessionProfit >= Number.parseFloat(targetProfit)) {
-              setResultType("tp")
-              setResultAmount(newSessionProfit)
-              setShowResultModal(true)
-              setIsRunning(false)
-              setStatus("completed")
-              addAnalysisLog("🎉 TARGET PROFIT reached!", "success")
-              break
-            }
-
-            if (newSessionProfit <= -(baseStake * 10)) {
-              setResultType("sl")
-              setResultAmount(Math.abs(newSessionProfit))
-              setShowResultModal(true)
-              setIsRunning(false)
-              setStatus("completed")
-              addAnalysisLog("⚠️ STOP LOSS hit!", "warning")
-              break
-            }
-
-            digitAppeared = false
-            ticksAfterAppearance = 0
-
-            if (autoRestartEnabled && isRunning) {
-              addAnalysisLog(`⏱️ Monitoring for digit ${targetDigit} again...`, "info")
-              await new Promise((resolve) => setTimeout(resolve, restartDelaySeconds * 1000))
-            } else {
-              break
-            }
-          } catch (error: any) {
-            console.error("[v0] Differs Pro trade error:", error)
-            addAnalysisLog(`❌ Trade error: ${error.message}`, "warning")
-            digitAppeared = false
-            ticksAfterAppearance = 0
-
-            if (autoRestartEnabled) {
-              await new Promise((resolve) => setTimeout(resolve, 5000))
-            } else {
-              break
-            }
-          }
-        }
-      }
-    }
-
-    if (isRunning) {
-      setIsRunning(false)
-      setStatus("completed")
-      addAnalysisLog("Differs Pro trading ended.", "info")
-    }
+  const startDiffersTrades = (analysis: any) => {
+    executeTrades(analysis)
   }
 
   const handleStopTrading = () => {
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
     if (analysisIntervalRef.current) clearInterval(analysisIntervalRef.current)
+    setShouldStopTrading(true)
     setIsRunning(false)
     setStatus("idle")
     addAnalysisLog("Trading stopped", "info")
+  }
+
+  const handleClear = () => {
+    // Stop any running trades
+    handleStopTrading()
+
+    // Reset all state
+    setStats({
+      totalWins: 0,
+      totalLosses: 0,
+      totalProfit: 0,
+      winRate: 0,
+      totalStake: 0,
+      totalPayout: 0,
+      numberOfRuns: 0,
+      contractsLost: 0,
+      contractsWon: 0,
+    })
+    setTradeHistory([])
+    setJournalLog([])
+    setSessionProfit(0)
+    setSessionTrades(0)
+    setAnalysisLog([])
+    setAnalysisData(null)
+    setShowAnalysisResults(false)
+    setDigitFrequencies(Array(10).fill(0))
+    setOverUnderAnalysis({ over: 0, under: 0, total: 0 })
+    setTicksCollected(0)
+    setIsTradeActive(false)
+    setShouldStopTrading(false)
+    setDiffersSelectedDigit(null)
+    setDiffersWaitingForEntry(false)
+    setDiffersTicksSinceAppearance(0)
+
+    addAnalysisLog("All data cleared and reset.", "info")
   }
 
   return (
@@ -1160,6 +1136,14 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
                 <Pause className="w-4 h-4 mr-2" />
                 Stop
               </Button>
+
+              <Button
+                onClick={handleClear}
+                variant="outline"
+                className={`flex-1 ${theme === "dark" ? "border-gray-600 text-gray-400 hover:bg-gray-800" : "border-gray-300 text-gray-600 hover:bg-gray-100"}`}
+              >
+                Clear
+              </Button>
             </div>
           </Card>
 
@@ -1226,27 +1210,28 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
             </Card>
           )}
 
-          <TradingStatsPanel
-            stats={stats}
-            theme={theme}
-            onReset={() => {
-              setStats({
-                totalWins: 0,
-                totalLosses: 0,
-                totalProfit: 0,
-                winRate: 0,
-                totalStake: 0,
-                totalPayout: 0,
-                numberOfRuns: 0,
-                contractsLost: 0,
-                contractsWon: 0,
-              })
-              setTradeHistory([])
-              setJournalLog([])
-            }}
-          />
+          <TradingStatsPanel stats={stats} theme={theme} onReset={handleClear} />
 
           {tradeHistory.length > 0 && <TransactionHistory transactions={tradeHistory} theme={theme} />}
+
+          {tradeHistory.length > 0 && (
+            <TradeLog
+              trades={tradeHistory.map((trade) => ({
+                id: trade.id,
+                timestamp: trade.timestamp,
+                volume: "1", // Placeholder, adjust if needed
+                tradeType: selectedStrategy, // Use selectedStrategy as tradeType
+                contractType: trade.contractType,
+                predicted: analysisData?.signal || "N/A", // Display predicted signal
+                result: trade.status,
+                entry: trade.entrySpot,
+                exit: trade.exitSpot,
+                stake: trade.buyPrice,
+                profitLoss: trade.profitLoss,
+              }))}
+              theme={theme}
+            />
+          )}
 
           {journalLog.length > 0 && <TradingJournalPanel entries={journalLog} theme={theme} />}
 
