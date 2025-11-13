@@ -96,6 +96,7 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
   const [botConfigs, setBotConfigs] = useState<Map<BotStrategy, BotConfig>>(new Map())
   const [botTickData, setBotTickData] = useState<Map<BotStrategy, number[]>>(new Map())
   const [tradeLogs, setTradeLogs] = useState<TradeLogEntry[]>([])
+  const [showMartingaleConfig, setShowMartingaleConfig] = useState<Map<BotStrategy, boolean>>(new Map())
 
   const tickManagerRef = useRef<TickHistoryManager | null>(null)
 
@@ -124,11 +125,10 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
         tickManagerRef.current = new TickHistoryManager(apiClient)
       }
 
-      // Load history sequentially for the single market (all bots use same market)
+      console.log("[v0] Loading tick history for AutoBots...")
       await tickManagerRef.current.loadTickHistorySequentially([symbol], 50)
-
-      // Subscribe to live updates
       await tickManagerRef.current.subscribeToMarkets([symbol])
+      console.log("[v0] Tick history loaded and subscribed")
     }
 
     initTickData()
@@ -138,7 +138,14 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
 
       const latestDigits = tickManagerRef.current.getTickBuffer(symbol)
 
-      if (latestDigits.length < 25) return
+      if (latestDigits.length > 0) {
+        console.log(`[v0] AutoBot received ${latestDigits.length} ticks for analysis`)
+      }
+
+      if (latestDigits.length < 25) {
+        console.log("[v0] Waiting for more ticks...")
+        return
+      }
 
       for (const strategy of BOT_STRATEGIES) {
         try {
@@ -171,6 +178,7 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
         signal: "WAIT",
         entryPoint: null,
         exitPoint: null,
+        distribution: {},
         powerDistribution: {},
       }
     }
@@ -310,6 +318,7 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
           signal: "WAIT",
           entryPoint: null,
           exitPoint: null,
+          distribution: {},
           powerDistribution: digitFrequency,
         }
     }
@@ -506,6 +515,7 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
             martingaleMultiplier: 2,
             duration: 1,
           }
+          const tickData = botTickData.get(strategy.id) || []
 
           return (
             <Card
@@ -529,14 +539,19 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                     <CardDescription className={`text-xs mt-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
                       {strategy.description}
                     </CardDescription>
+                    <div className={`text-xs mt-1 ${theme === "dark" ? "text-cyan-400" : "text-cyan-600"}`}>
+                      Data: {tickData.length} ticks
+                    </div>
                   </div>
-                  {isReady && !isRunning && <Badge className="bg-green-500 text-white animate-pulse">READY</Badge>}
-                  {isRunning && (
-                    <Badge className="bg-blue-500 text-white">
-                      <Activity className="w-3 h-3 mr-1 animate-spin" />
-                      ACTIVE
-                    </Badge>
-                  )}
+                  <div className="flex flex-col gap-2">
+                    {isReady && !isRunning && <Badge className="bg-green-500 text-white animate-pulse">READY</Badge>}
+                    {isRunning && (
+                      <Badge className="bg-blue-500 text-white">
+                        <Activity className="w-3 h-3 mr-1 animate-spin" />
+                        TRADING
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
 
@@ -587,29 +602,6 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                     )}
 
                     {/* Statistical Analysis */}
-                    <div
-                      className={`p-3 rounded-lg ${theme === "dark" ? "bg-cyan-500/10 border border-cyan-500/30" : "bg-cyan-50 border border-cyan-200"}`}
-                    >
-                      <div
-                        className={`text-xs font-semibold mb-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}
-                      >
-                        Distribution
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {Object.entries(analysis.distribution || {}).map(([key, value]) => (
-                          <div key={key} className="text-center">
-                            <div className={`text-xs ${theme === "dark" ? "text-gray-500" : "text-gray-600"}`}>
-                              {key}
-                            </div>
-                            <div className={`text-sm font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                              {value}%
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Trade Conditions */}
                     <div
                       className={`p-3 rounded-lg text-xs ${theme === "dark" ? "bg-gray-800 border border-gray-700" : "bg-gray-50 border border-gray-200"}`}
                     >
@@ -668,15 +660,33 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                         />
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={botConfig.useMartingale}
-                        onCheckedChange={(checked) => updateBotConfig(strategy.id, { useMartingale: checked })}
-                        className="scale-75"
-                      />
-                      <Label className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                        Martingale
-                      </Label>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={botConfig.useMartingale}
+                          onCheckedChange={(checked) => {
+                            updateBotConfig(strategy.id, { useMartingale: checked })
+                            setShowMartingaleConfig((prev) => new Map(prev).set(strategy.id, checked))
+                          }}
+                          className="scale-75"
+                        />
+                        <Label className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                          Martingale
+                        </Label>
+                      </div>
+                      {botConfig.useMartingale && (
+                        <Input
+                          type="number"
+                          value={botConfig.martingaleMultiplier}
+                          onChange={(e) =>
+                            updateBotConfig(strategy.id, { martingaleMultiplier: Number.parseFloat(e.target.value) })
+                          }
+                          className={`h-8 text-xs w-20 ${theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}`}
+                          step="0.1"
+                          min="1.1"
+                          placeholder="x2"
+                        />
+                      )}
                     </div>
                   </div>
                 )}
@@ -708,6 +718,11 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                         ${botState.profitLoss.toFixed(2)}
                       </div>
                     </div>
+                    <div className="col-span-2 text-center">
+                      <Badge className="bg-blue-500/20 text-blue-400 text-xs">
+                        {botState.isAnalyzing ? "Analyzing..." : botState.isTrading ? "Placing Trade..." : "Monitoring"}
+                      </Badge>
+                    </div>
                   </div>
                 )}
 
@@ -728,11 +743,11 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                     className={`w-full gap-2 ${
                       isReady ? "bg-green-500 hover:bg-green-600 animate-pulse" : "bg-blue-500 hover:bg-blue-600"
                     }`}
-                    disabled={!isConnected || !isAuthorized}
+                    disabled={!isConnected || !isAuthorized || tickData.length < 25}
                     size="sm"
                   >
                     <Play className="w-4 h-4" />
-                    {isReady ? "Start Trading" : "Start"}
+                    {tickData.length < 25 ? "Loading Data..." : isReady ? "Start Trading" : "Start"}
                   </Button>
                 )}
               </CardContent>

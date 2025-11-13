@@ -33,6 +33,7 @@ import { ResponsiveTabs } from "@/components/responsive-tabs"
 import { MoneyMakerTab } from "@/components/tabs/money-maker-tab"
 import { TradeNowTab } from "@/components/tabs/trade-now-tab"
 import { ToolsInfoTab } from "@/components/tabs/tools-info-tab"
+import { CopyTradingTab } from "@/components/tabs/copy-trading-tab"
 
 export default function DerivAnalysisApp() {
   const [theme, setTheme] = useState<"light" | "dark">("dark")
@@ -325,6 +326,7 @@ export default function DerivAnalysisApp() {
               "trade-now",
               "smartauto24",
               "tools-info",
+              "copy-trading",
             ].map((tab) => (
               <TabsTrigger
                 key={tab}
@@ -334,11 +336,13 @@ export default function DerivAnalysisApp() {
                     ? "data-[state=active]:border-yellow-500 data-[state=active]:text-yellow-500 data-[state=active]:shadow-[0_2px_10px_rgba(234,179,8,0.3)]"
                     : tab === "autobot"
                       ? "data-[state=active]:border-cyan-500 data-[state=active]:text-cyan-500 data-[state=active]:shadow-[0_2px_10px_rgba(34,211,238,0.3)]"
-                      : tab === "tools-info"
+                      : tab === "copy-trading"
                         ? "data-[state=active]:border-purple-500 data-[state=active]:text-purple-500 data-[state=active]:shadow-[0_2px_10px_rgba(168,85,247,0.3)]"
-                        : tab === "trade-now"
-                          ? "data-[state=active]:border-green-500 data-[state=active]:text-green-500 data-[state=active]:shadow-[0_2px_10px_rgba(34,197,94,0.3)]"
-                          : "data-[state=active]:border-green-400 data-[state=active]:text-green-400 data-[state=active]:shadow-[0_2px_10px_rgba(34,211,238,0.3)]"
+                        : tab === "tools-info"
+                          ? "data-[state=active]:border-purple-500 data-[state=active]:text-purple-500 data-[state=active]:shadow-[0_2px_10px_rgba(168,85,247,0.3)]"
+                          : tab === "trade-now"
+                            ? "data-[state=active]:border-green-500 data-[state=active]:text-green-500 data-[state=active]:shadow-[0_2px_10px_rgba(34,197,94,0.3)]"
+                            : "data-[state=active]:border-green-400 data-[state=active]:text-green-400 data-[state=active]:shadow-[0_2px_10px_rgba(34,211,238,0.3)]"
                 } data-[state=active]:bg-transparent ${theme === "dark" ? "text-gray-400 hover:text-white" : "text-gray-600 hover:text-gray-900"}`}
               >
                 {tab === "smart-analysis"
@@ -373,7 +377,9 @@ export default function DerivAnalysisApp() {
                                               ? "SmartAuto24 ⭐"
                                               : tab === "tools-info"
                                                 ? "Tools & Info 🛠️"
-                                                : tab.replace(/-/g, " ")}
+                                                : tab === "copy-trading"
+                                                  ? "Copy Trading 📋"
+                                                  : tab.replace(/-/g, " ")}
               </TabsTrigger>
             ))}
           </ResponsiveTabs>
@@ -664,6 +670,10 @@ export default function DerivAnalysisApp() {
 
               <TabsContent value="tools-info" className="mt-0">
                 <ToolsInfoTab theme={theme} connectionLogs={connectionLogs} />
+              </TabsContent>
+
+              <TabsContent value="copy-trading" className="mt-0">
+                <CopyTradingTab theme={theme} />
               </TabsContent>
             </>
           )}

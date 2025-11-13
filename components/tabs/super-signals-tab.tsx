@@ -4,7 +4,9 @@ import { useState, useEffect, useRef } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Activity, Zap, X } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import { Activity, Zap, X, Eye, EyeOff } from "lucide-react"
 import { TickHistoryManager } from "@/lib/tick-history-manager"
 import { DerivAPIClient } from "@/lib/deriv-api"
 
@@ -54,6 +56,7 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
   const [marketsData, setMarketsData] = useState<Map<string, MarketData>>(new Map())
   const [tradeSignals, setTradeSignals] = useState<TradeSignal[]>([])
   const [showSignalPopup, setShowSignalPopup] = useState(false)
+  const [autoShowSignals, setAutoShowSignals] = useState(true)
   const tickManagerRef = useRef<TickHistoryManager | null>(null)
   const apiClientRef = useRef<any>(null)
   const isInitializedRef = useRef(false)
@@ -337,13 +340,24 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
         })
         return uniqueSignals
       })
-      setShowSignalPopup(true)
+      if (autoShowSignals) {
+        setShowSignalPopup(true)
+      }
     }
   }
 
   const handleCloseAllSignals = () => {
     setShowSignalPopup(false)
-    setTradeSignals([])
+  }
+
+  const handleDismissPopup = () => {
+    setShowSignalPopup(false)
+  }
+
+  const handleShowActiveSignals = () => {
+    if (tradeSignals.length > 0) {
+      setShowSignalPopup(true)
+    }
   }
 
   const handleCloseSignal = (idx: number) => {
@@ -378,10 +392,31 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
           >
             Super Signals - Multi-Market Analysis
           </h2>
-          <Badge className="bg-emerald-500 text-white text-sm px-4 py-2 animate-pulse flex items-center gap-2">
-            <Activity className="h-4 w-4" />
-            Live Monitoring {MARKETS.length} Markets
-          </Badge>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={autoShowSignals}
+                onCheckedChange={setAutoShowSignals}
+                className="data-[state=checked]:bg-green-500"
+              />
+              <Label className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                Auto-show signals
+              </Label>
+            </div>
+            {tradeSignals.length > 0 && (
+              <Button
+                onClick={handleShowActiveSignals}
+                className="bg-emerald-500 hover:bg-emerald-600 text-white flex items-center gap-2"
+              >
+                <Eye className="h-4 w-4" />
+                View Signals ({tradeSignals.length})
+              </Button>
+            )}
+            <Badge className="bg-emerald-500 text-white text-sm px-4 py-2 animate-pulse flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              Live Monitoring {MARKETS.length} Markets
+            </Badge>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -501,17 +536,31 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
       {showSignalPopup && tradeSignals.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="max-w-6xl w-full max-h-[85vh] overflow-hidden flex flex-col bg-gray-900/95 rounded-2xl">
-            <div className="flex justify-between items-center p-4 border-b border-white/10">
-              <h3 className="text-xl font-bold text-white">Active Trade Signals</h3>
-              <Button
-                onClick={handleCloseAllSignals}
-                variant="outline"
-                size="sm"
-                className="bg-red-500/20 hover:bg-red-500/30 border-red-500/50 text-white"
-              >
-                <X className="h-4 w-4 mr-2" />
-                Close All Signals
-              </Button>
+            <div className="flex justify-between items-center p-4 border-b border-white/10 flex-shrink-0">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <Zap className="h-5 w-5 text-yellow-400" />
+                Active Trade Signals ({tradeSignals.length})
+              </h3>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={handleDismissPopup}
+                  variant="outline"
+                  size="sm"
+                  className="bg-gray-700/50 hover:bg-gray-700 border-gray-600 text-white"
+                >
+                  <EyeOff className="h-4 w-4 mr-2" />
+                  Dismiss
+                </Button>
+                <Button
+                  onClick={handleCloseAllSignals}
+                  variant="outline"
+                  size="sm"
+                  className="bg-red-500/20 hover:bg-red-500/30 border-red-500/50 text-white"
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Clear All
+                </Button>
+              </div>
             </div>
 
             <div className="overflow-y-auto p-4 flex-1">
