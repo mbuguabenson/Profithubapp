@@ -29,6 +29,7 @@ interface SignalState {
   accuracy: number
   successfulTrades: number
   totalTrades: number
+  entryPoint?: string
 }
 
 interface MoneyMakerTabProps {
@@ -57,7 +58,6 @@ export function MoneyMakerTab({ theme = "dark", recentDigits = [] }: MoneyMakerT
     totalTrades: 0,
   })
 
-  const last12Digits = recentDigits.slice(-12)
   const last20Digits = recentDigits.slice(-20)
 
   useEffect(() => {
@@ -199,6 +199,7 @@ export function MoneyMakerTab({ theme = "dark", recentDigits = [] }: MoneyMakerT
           (underPercent >= 56 && underIncreasing && !isVolatile)
         ) {
           const signalType = overPercent >= 56 ? "OVER" : "UNDER"
+          const entryDigit = signalType === "OVER" ? analysis?.strongestOver : analysis?.strongestUnder
           setSignal({
             status: "RUN NOW",
             color: "orange",
@@ -207,6 +208,7 @@ export function MoneyMakerTab({ theme = "dark", recentDigits = [] }: MoneyMakerT
             phase: 2,
             confirmedTicks: 15,
             tradingTicksRemaining: TRADING_TICKS_MAX,
+            entryPoint: `Enter ${signalType} position targeting digit ${entryDigit}`,
           })
 
           return
@@ -312,6 +314,23 @@ export function MoneyMakerTab({ theme = "dark", recentDigits = [] }: MoneyMakerT
           </Badge>
         </div>
 
+        {signal.status === "RUN NOW" && signal.entryPoint && (
+          <div
+            className={`rounded-lg p-4 mb-6 border animate-pulse ${
+              theme === "dark"
+                ? "bg-orange-500/20 border-orange-500/40 shadow-[0_0_20px_rgba(249,115,22,0.4)]"
+                : "bg-orange-100 border-orange-300"
+            }`}
+          >
+            <h3 className={`text-lg font-bold mb-2 ${theme === "dark" ? "text-orange-300" : "text-orange-800"}`}>
+              📍 Entry Point
+            </h3>
+            <p className={`text-base font-semibold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+              {signal.entryPoint}
+            </p>
+          </div>
+        )}
+
         {signal.status === "EXIT" && signal.totalTrades > 0 && (
           <div
             className={`rounded-lg p-4 mb-6 border ${
@@ -350,21 +369,6 @@ export function MoneyMakerTab({ theme = "dark", recentDigits = [] }: MoneyMakerT
           </div>
         )}
       </div>
-
-      {last12Digits.length > 0 && (
-        <div
-          className={`rounded-xl p-6 border ${
-            theme === "dark"
-              ? "bg-gradient-to-br from-[#0f1629]/80 to-[#1a2235]/80 border-blue-500/20 shadow-[0_0_30px_rgba(59,130,246,0.2)]"
-              : "bg-white border-gray-200 shadow-lg"
-          }`}
-        >
-          <h3 className={`text-lg font-bold mb-4 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-            Last 12 Digits
-          </h3>
-          <LastDigitsChart digits={last12Digits} />
-        </div>
-      )}
 
       {last20Digits.length > 0 && (
         <div

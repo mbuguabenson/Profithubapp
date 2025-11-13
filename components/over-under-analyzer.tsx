@@ -115,7 +115,7 @@ export function OverUnderAnalyzer({ ticks, currentPrice, theme = "dark" }: OverU
       {/* Top Section with Title and Trade Button */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <h2 className={`text-2xl font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-          Under (0–4) / Over (5–9) Analysis
+          Under (0–4) / Over (5–9) Analysis (Last {ticks.length} Ticks)
         </h2>
         {signal === "TRADE" || signal === "STRONG" ? (
           <Button
@@ -210,9 +210,6 @@ export function OverUnderAnalyzer({ ticks, currentPrice, theme = "dark" }: OverU
               className="h-8 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500"
             />
           </div>
-          <div className={`text-sm mt-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-            Count: {underCount} / {total}
-          </div>
         </motion.div>
 
         {/* Over Bar */}
@@ -241,9 +238,6 @@ export function OverUnderAnalyzer({ ticks, currentPrice, theme = "dark" }: OverU
               transition={{ duration: 0.8, ease: "easeOut" }}
               className="h-8 rounded-full bg-gradient-to-r from-green-600 to-emerald-500"
             />
-          </div>
-          <div className={`text-sm mt-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-            Count: {overCount} / {total}
           </div>
         </motion.div>
       </div>

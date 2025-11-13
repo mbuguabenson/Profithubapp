@@ -51,14 +51,13 @@ export function OverUnderTab({
   }, [maxPercentage])
 
   useEffect(() => {
-    const last50Digits = recentDigits.slice(-50)
-    const underCount50 = last50Digits.filter((d) => d >= 0 && d <= 4).length
-    const overCount50 = last50Digits.filter((d) => d >= 5 && d <= 9).length
-    const underPercent50 = last50Digits.length > 0 ? (underCount50 / last50Digits.length) * 100 : 50
-    const overPercent50 = last50Digits.length > 0 ? (overCount50 / last50Digits.length) * 100 : 50
+    const underCount = recentDigits.filter((d) => d >= 0 && d <= 4).length
+    const overCount = recentDigits.filter((d) => d >= 5 && d <= 9).length
+    const underPercent = recentDigits.length > 0 ? (underCount / recentDigits.length) * 100 : 50
+    const overPercent = recentDigits.length > 0 ? (overCount / recentDigits.length) * 100 : 50
 
-    const newFavored = underPercent50 > overPercent50 ? "under" : "over"
-    const newMaxPercentage = Math.max(underPercent50, overPercent50)
+    const newFavored = underPercent > overPercent ? "under" : "over"
+    const newMaxPercentage = Math.max(underPercent, overPercent)
 
     setMaxPercentage(newMaxPercentage)
     setFavored(newFavored)
@@ -73,7 +72,7 @@ export function OverUnderTab({
   }
 
   const last20Digits = recentDigits.slice(-20)
-  const last50Digits = recentDigits.slice(-50)
+  const analysisDigits = recentDigits // Use all available digits for analysis
 
   const calculateStreak = (digits: number[]) => {
     if (digits.length === 0) return { type: "none", count: 0 }
@@ -94,15 +93,14 @@ export function OverUnderTab({
   }
 
   const calculateDigitPower = (digit: number) => {
-    const digitOccurrences = last50Digits.filter((d) => d === digit).length
-    const frequency = last50Digits.length > 0 ? (digitOccurrences / last50Digits.length) * 100 : 0
+    const digitOccurrences = analysisDigits.filter((d) => d === digit).length
+    const frequency = analysisDigits.length > 0 ? (digitOccurrences / analysisDigits.length) * 100 : 0
 
-    // Calculate consecutive appearances in last 10 digits
-    const last10 = last50Digits.slice(-10)
-    const recentOccurrences = last10.filter((d) => d === digit).length
-    const momentum = (recentOccurrences / 10) * 100
+    const momentumSampleSize = Math.max(10, Math.floor(analysisDigits.length * 0.1))
+    const recentSample = analysisDigits.slice(-momentumSampleSize)
+    const recentOccurrences = recentSample.filter((d) => d === digit).length
+    const momentum = (recentOccurrences / recentSample.length) * 100
 
-    // Calculate prediction confidence based on frequency and momentum
     const confidence = frequency * 0.6 + momentum * 0.4
 
     let strength: "VERY STRONG" | "STRONG" | "MODERATE" | "WEAK" = "WEAK"
@@ -123,13 +121,33 @@ export function OverUnderTab({
 
   const digitPower = calculateDigitPower(selectedDigit)
 
-  const streak = calculateStreak(last50Digits)
+  const streak = calculateStreak(analysisDigits)
 
-  const overSelectedCount = last50Digits.filter((d) => d > selectedDigit).length
-  const underSelectedCount = last50Digits.filter((d) => d < selectedDigit).length
-  const equalsSelectedCount = last50Digits.filter((d) => d === selectedDigit).length
-  const overSelectedPercent = last50Digits.length > 0 ? (overSelectedCount / last50Digits.length) * 100 : 0
-  const underSelectedPercent = last50Digits.length > 0 ? (underSelectedCount / last50Digits.length) * 100 : 0
+  const calculateUnderOverStats = () => {
+    const underDigits = recentDigits.filter((d) => d >= 0 && d <= 4)
+    const overDigits = recentDigits.filter((d) => d >= 5 && d <= 9)
+
+    const underCounts = [0, 1, 2, 3, 4].map((digit) => ({
+      digit,
+      count: underDigits.filter((d) => d === digit).length,
+    }))
+    const overCounts = [5, 6, 7, 8, 9].map((digit) => ({
+      digit,
+      count: overDigits.filter((d) => d === digit).length,
+    }))
+
+    const highestUnder = underCounts.reduce((max, curr) => (curr.count > max.count ? curr : max), underCounts[0])
+    const highestOver = overCounts.reduce((max, curr) => (curr.count > max.count ? curr : max), overCounts[0])
+
+    const underCount = underDigits.length
+    const overCount = overDigits.length
+    const underPercent = recentDigits.length > 0 ? (underCount / recentDigits.length) * 100 : 50
+    const overPercent = recentDigits.length > 0 ? (overCount / recentDigits.length) * 100 : 50
+
+    return { underPercent, overPercent, highestUnder, highestOver }
+  }
+
+  const { underPercent, overPercent, highestUnder, highestOver } = calculateUnderOverStats()
 
   let signalStatus: "TRADE NOW" | "WAIT" | "NEUTRAL" = "NEUTRAL"
   let signalMessage = ""
@@ -137,13 +155,15 @@ export function OverUnderTab({
 
   if (maxPercentage >= 70) {
     signalStatus = "TRADE NOW"
-    signalMessage = `VERY STRONG ${favored.toUpperCase()} signal at ${maxPercentage.toFixed(1)}%`
-    entryPoint = `Enter ${favored.toUpperCase()} position now at price ${currentPrice?.toFixed(5) || "---"}`
+    const favoredDigit = favored === "under" ? highestUnder.digit : highestOver.digit
+    signalMessage = `VERY STRONG ${favored.toUpperCase()} signal at ${maxPercentage.toFixed(1)}% (Digit ${favoredDigit} leading)`
+    entryPoint = `Enter ${favored.toUpperCase()} position at price ${currentPrice?.toFixed(5) || "---"} targeting digit ${favoredDigit}`
     if (tradeTimer === 0) setTradeTimer(60)
   } else if (maxPercentage >= 60) {
     signalStatus = "TRADE NOW"
-    signalMessage = `STRONG ${favored.toUpperCase()} signal at ${maxPercentage.toFixed(1)}%`
-    entryPoint = `Enter ${favored.toUpperCase()} position at price ${currentPrice?.toFixed(5) || "---"}`
+    const favoredDigit = favored === "under" ? highestUnder.digit : highestOver.digit
+    signalMessage = `STRONG ${favored.toUpperCase()} signal at ${maxPercentage.toFixed(1)}% (Digit ${favoredDigit} leading)`
+    entryPoint = `Enter ${favored.toUpperCase()} position at price ${currentPrice?.toFixed(5) || "---"} targeting digit ${favoredDigit}`
     if (tradeTimer === 0) setTradeTimer(60)
   } else if (maxPercentage >= 55) {
     signalStatus = "WAIT"
@@ -154,9 +174,46 @@ export function OverUnderTab({
 
   return (
     <div className="space-y-6">
-      <OverUnderAnalyzer ticks={last50Digits} currentPrice={currentPrice} theme={theme} />
+      <OverUnderAnalyzer ticks={analysisDigits} currentPrice={currentPrice} theme={theme} />
 
-      {/* Select Digit for Over/Under Analysis */}
+      <div
+        className={`rounded-xl p-6 border ${
+          theme === "dark"
+            ? "bg-gradient-to-br from-[#0a0e27] to-[#0f1535] border-blue-500/20"
+            : "bg-white border-gray-200"
+        }`}
+      >
+        <h3 className={`text-xl font-bold mb-4 text-center ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+          Under (0-4) / Over (5-9) Analysis
+        </h3>
+
+        <div className="grid grid-cols-2 gap-6 mb-6">
+          <div className={`p-4 rounded-lg ${theme === "dark" ? "bg-blue-900/30" : "bg-blue-50"}`}>
+            <div className={`text-lg font-bold mb-2 ${theme === "dark" ? "text-blue-300" : "text-blue-800"}`}>
+              Under (0-4)
+            </div>
+            <div className={`text-4xl font-bold mb-2 ${theme === "dark" ? "text-cyan-400" : "text-cyan-600"}`}>
+              {underPercent.toFixed(1)}%
+            </div>
+            <div className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+              Highest: Digit {highestUnder.digit} ({highestUnder.count}x)
+            </div>
+          </div>
+
+          <div className={`p-4 rounded-lg ${theme === "dark" ? "bg-green-900/30" : "bg-green-50"}`}>
+            <div className={`text-lg font-bold mb-2 ${theme === "dark" ? "text-green-300" : "text-green-800"}`}>
+              Over (5-9)
+            </div>
+            <div className={`text-4xl font-bold mb-2 ${theme === "dark" ? "text-green-400" : "text-green-600"}`}>
+              {overPercent.toFixed(1)}%
+            </div>
+            <div className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+              Highest: Digit {highestOver.digit} ({highestOver.count}x)
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div
         className={`rounded-xl p-6 border ${
           theme === "dark"
@@ -188,7 +245,6 @@ export function OverUnderTab({
           ))}
         </div>
 
-        {/* Digit Power Prediction Display */}
         <div
           className={`mb-6 p-5 rounded-xl border ${
             theme === "dark"
@@ -205,7 +261,7 @@ export function OverUnderTab({
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div className={`p-4 rounded-lg ${theme === "dark" ? "bg-gray-800/50" : "bg-white"}`}>
               <div className={`text-xs font-semibold mb-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                Frequency (Last 50)
+                Frequency (Last {analysisDigits.length})
               </div>
               <div className={`text-2xl font-bold ${theme === "dark" ? "text-cyan-400" : "text-cyan-600"}`}>
                 {digitPower.frequency}%
@@ -217,7 +273,7 @@ export function OverUnderTab({
 
             <div className={`p-4 rounded-lg ${theme === "dark" ? "bg-gray-800/50" : "bg-white"}`}>
               <div className={`text-xs font-semibold mb-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                Momentum (Last 10)
+                Momentum (Last {Math.max(10, Math.floor(analysisDigits.length * 0.1))})
               </div>
               <div className={`text-2xl font-bold ${theme === "dark" ? "text-green-400" : "text-green-600"}`}>
                 {digitPower.momentum}%
@@ -269,7 +325,6 @@ export function OverUnderTab({
         </div>
 
         <div className="space-y-3">
-          {/* Over Analysis */}
           <div className="flex items-center gap-4">
             <div className={`text-sm font-semibold w-32 ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}>
               Over ({selectedDigit + 1}-9)
@@ -282,18 +337,17 @@ export function OverUnderTab({
                       ? "bg-gradient-to-r from-green-600 to-green-500"
                       : "bg-gradient-to-r from-green-500 to-green-400"
                   }`}
-                  style={{ width: `${Math.min(overSelectedPercent, 100)}%` }}
+                  style={{ width: `${Math.min(overPercent, 100)}%` }}
                 />
               </div>
             </div>
             <div
               className={`text-xl font-bold w-20 text-right ${theme === "dark" ? "text-cyan-400" : "text-cyan-600"}`}
             >
-              {overSelectedPercent.toFixed(1)}%
+              {overPercent.toFixed(1)}%
             </div>
           </div>
 
-          {/* Under Analysis */}
           <div className="flex items-center gap-4">
             <div className={`text-sm font-semibold w-32 ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}>
               Under (0-{selectedDigit - 1})
@@ -306,51 +360,32 @@ export function OverUnderTab({
                       ? "bg-gradient-to-r from-blue-600 to-cyan-500"
                       : "bg-gradient-to-r from-blue-500 to-cyan-400"
                   }`}
-                  style={{ width: `${Math.min(underSelectedPercent, 100)}%` }}
+                  style={{ width: `${Math.min(underPercent, 100)}%` }}
                 />
               </div>
             </div>
             <div
               className={`text-xl font-bold w-20 text-right ${theme === "dark" ? "text-cyan-400" : "text-cyan-600"}`}
             >
-              {underSelectedPercent.toFixed(1)}%
+              {underPercent.toFixed(1)}%
             </div>
           </div>
 
-          {/* Equals Selected Digit */}
-          {equalsSelectedCount > 0 && (
+          {digitPower.digit === selectedDigit && (
             <div className={`text-center mt-2 p-2 rounded ${theme === "dark" ? "bg-orange-900/30" : "bg-orange-50"}`}>
               <span className={`text-sm font-semibold ${theme === "dark" ? "text-orange-400" : "text-orange-600"}`}>
-                Digit {selectedDigit} appeared {equalsSelectedCount} times (
-                {((equalsSelectedCount / last50Digits.length) * 100).toFixed(1)}%)
+                Digit {selectedDigit} appeared {digitPower.occurrences} times ({digitPower.frequency}%)
               </span>
             </div>
           )}
         </div>
 
-        <div className="text-center mt-6">
-          <div className={`text-sm mb-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Current Streak:</div>
-          <div
-            className={`text-3xl font-bold ${
-              streak.type === "over"
-                ? theme === "dark"
-                  ? "text-green-400"
-                  : "text-green-600"
-                : theme === "dark"
-                  ? "text-cyan-400"
-                  : "text-cyan-600"
-            }`}
-          >
-            {streak.count}x {streak.type === "over" ? "Over" : "Under"}
-          </div>
-        </div>
-
         <div className="mt-6">
           <h4 className={`text-sm font-bold mb-3 text-center ${theme === "dark" ? "text-gray-400" : "text-gray-700"}`}>
-            Last 50 Digits (U = Under, O = Over, C = Current Digit {selectedDigit})
+            Last {analysisDigits.length} Digits (U = Under, O = Over, C = Current Digit {selectedDigit})
           </h4>
           <div className="flex flex-wrap gap-1.5 justify-center">
-            {last50Digits.map((digit, idx) => {
+            {analysisDigits.map((digit, idx) => {
               const isCurrentDigit = digit === selectedDigit
               const isOver = digit > selectedDigit
               const isUnder = digit < selectedDigit
@@ -419,7 +454,6 @@ export function OverUnderTab({
         )}
       </div>
 
-      {/* Current Digit and Price */}
       <div
         className={`rounded-xl p-4 border text-center ${
           theme === "dark"
@@ -444,7 +478,6 @@ export function OverUnderTab({
         </div>
       </div>
 
-      {/* Last 20 Digits */}
       {last20Digits.length > 0 && (
         <div
           className={`rounded-xl p-6 border ${
@@ -460,7 +493,6 @@ export function OverUnderTab({
         </div>
       )}
 
-      {/* Digits Line Chart */}
       {last20Digits.length > 0 && (
         <div
           className={`rounded-xl p-6 border ${
@@ -476,7 +508,6 @@ export function OverUnderTab({
         </div>
       )}
 
-      {/* Trade Button */}
       {signalStatus === "TRADE NOW" && (
         <Button
           size="lg"
