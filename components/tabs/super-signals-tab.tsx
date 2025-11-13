@@ -4,8 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Activity, Zap, Target } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Activity, Zap, X } from "lucide-react"
 
 interface MarketData {
   symbol: string
@@ -29,6 +28,7 @@ interface TradeSignal {
   validity: string
   confidence: number
   conditions: string[]
+  category: "even-odd" | "over-under" | "differs"
 }
 
 const MARKETS = [
@@ -50,7 +50,7 @@ interface SuperSignalsTabProps {
 
 export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
   const [marketsData, setMarketsData] = useState<Map<string, MarketData>>(new Map())
-  const [tradeSignal, setTradeSignal] = useState<TradeSignal | null>(null)
+  const [tradeSignals, setTradeSignals] = useState<TradeSignal[]>([])
   const [showSignalPopup, setShowSignalPopup] = useState(false)
   const wsConnectionsRef = useRef<Map<string, WebSocket>>(new Map())
 
@@ -58,7 +58,6 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
     const initialData = new Map<string, MarketData>()
 
     MARKETS.forEach((market) => {
-      // Initialize market data
       initialData.set(market.symbol, {
         symbol: market.symbol,
         displayName: market.name,
@@ -74,7 +73,6 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
         },
       })
 
-      // Create WebSocket connection for each market
       const ws = new WebSocket("wss://ws.derivws.com/websockets/v3?app_id=1089")
 
       ws.onopen = () => {
@@ -93,7 +91,6 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
 
     setMarketsData(initialData)
 
-    // Cleanup WebSocket connections on unmount
     return () => {
       wsConnectionsRef.current.forEach((ws) => ws.close())
       wsConnectionsRef.current.clear()
@@ -110,7 +107,6 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
       const lastDigit = Math.floor((price * 100) % 10)
       const newDigits = [...marketData.last100Digits, lastDigit].slice(-100)
 
-      // Analyze only if we have 100 digits
       let analysis = marketData.analysis
       if (newDigits.length === 100) {
         const underCount = newDigits.filter((d) => d < 5).length
@@ -118,7 +114,6 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
         const evenCount = newDigits.filter((d) => d % 2 === 0).length
         const oddCount = newDigits.filter((d) => d % 2 === 1).length
 
-        // Find least frequent digit for differs
         const digitCounts = Array(10).fill(0)
         newDigits.forEach((d) => digitCounts[d]++)
         const minCount = Math.min(...digitCounts)
@@ -153,7 +148,6 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
           },
         }
 
-        // Check if any signal should trigger popup
         checkForTradeSignal(symbol, marketData.displayName, analysis, price)
       }
 
@@ -184,6 +178,7 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
         entryPoint: price.toFixed(5),
         validity: "5 ticks",
         confidence: analysis.under.percentage,
+        category: "over-under",
         conditions: [
           `Under digits: ${analysis.under.count}/100 (${analysis.under.percentage}%)`,
           `Strong dominance detected`,
@@ -199,6 +194,7 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
         entryPoint: price.toFixed(5),
         validity: "5 ticks",
         confidence: analysis.over.percentage,
+        category: "over-under",
         conditions: [
           `Over digits: ${analysis.over.count}/100 (${analysis.over.percentage}%)`,
           `Strong dominance detected`,
@@ -214,6 +210,7 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
         entryPoint: price.toFixed(5),
         validity: "5 ticks",
         confidence: analysis.even.percentage,
+        category: "even-odd",
         conditions: [
           `Even digits: ${analysis.even.count}/100 (${analysis.even.percentage}%)`,
           `Strong pattern detected`,
@@ -229,6 +226,7 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
         entryPoint: price.toFixed(5),
         validity: "5 ticks",
         confidence: analysis.odd.percentage,
+        category: "even-odd",
         conditions: [
           `Odd digits: ${analysis.odd.count}/100 (${analysis.odd.percentage}%)`,
           `Strong pattern detected`,
@@ -244,6 +242,7 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
         entryPoint: price.toFixed(5),
         validity: "5 ticks",
         confidence: analysis.differs.percentage,
+        category: "differs",
         conditions: [
           `Digit ${analysis.differs.digit} rarely appears: ${analysis.differs.count}/100`,
           `High probability of difference`,
@@ -252,9 +251,17 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
       })
     }
 
-    // Show popup for the first strong signal
-    if (signals.length > 0 && !showSignalPopup) {
-      setTradeSignal(signals[0])
+    if (signals.length > 0) {
+      setTradeSignals((prev) => {
+        const uniqueSignals = [...prev]
+        signals.forEach((signal) => {
+          const exists = uniqueSignals.some((s) => s.market === signal.market && s.tradeType === signal.tradeType)
+          if (!exists) {
+            uniqueSignals.push(signal)
+          }
+        })
+        return uniqueSignals
+      })
       setShowSignalPopup(true)
     }
   }
@@ -339,24 +346,57 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
               }`}
             >
               <div className="flex items-start justify-between mb-3">
-                <div>
+                <div className="flex-1">
                   <h3 className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
                     {market.displayName}
                   </h3>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Price:</span>
-                    <span className={`text-sm font-bold ${theme === "dark" ? "text-cyan-400" : "text-cyan-600"}`}>
-                      {market.currentPrice.toFixed(5)}
-                    </span>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Price:</span>
+                      <span className={`text-sm font-bold ${theme === "dark" ? "text-cyan-400" : "text-cyan-600"}`}>
+                        {market.currentPrice.toFixed(5)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                        Last Digit:
+                      </span>
+                      <span className={`text-lg font-bold ${theme === "dark" ? "text-orange-400" : "text-orange-600"}`}>
+                        {market.lastDigit}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                      Last Digit:
-                    </span>
-                    <span className={`text-lg font-bold ${theme === "dark" ? "text-orange-400" : "text-orange-600"}`}>
-                      {market.lastDigit}
-                    </span>
-                  </div>
+
+                  {market.last100Digits.length === 100 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${
+                          theme === "dark" ? "border-green-500/50 text-green-400" : "border-green-500 text-green-600"
+                        }`}
+                      >
+                        E:{market.analysis.even.percentage}% O:{market.analysis.odd.percentage}%
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${
+                          theme === "dark" ? "border-blue-500/50 text-blue-400" : "border-blue-500 text-blue-600"
+                        }`}
+                      >
+                        U:{market.analysis.under.percentage}% O:{market.analysis.over.percentage}%
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${
+                          theme === "dark"
+                            ? "border-purple-500/50 text-purple-400"
+                            : "border-purple-500 text-purple-600"
+                        }`}
+                      >
+                        D:{market.analysis.differs.digit}
+                      </Badge>
+                    </div>
+                  )}
                 </div>
                 {market.last100Digits.length === 100 && (
                   <Badge
@@ -366,241 +406,136 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
                   </Badge>
                 )}
               </div>
-
-              {market.last100Digits.length === 100 && (
-                <div className="space-y-2">
-                  {/* Under/Over Analysis */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div
-                      className={`p-2 rounded border ${
-                        market.analysis.under.signal === "TRADE NOW"
-                          ? "bg-emerald-500/20 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
-                          : theme === "dark"
-                            ? "bg-gray-800/50 border-gray-700"
-                            : "bg-gray-100 border-gray-300"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                          Under (0-4)
-                        </span>
-                        <Badge
-                          className={`text-xs ${
-                            market.analysis.under.signal === "TRADE NOW"
-                              ? "bg-emerald-500 text-white animate-pulse"
-                              : "bg-blue-500/20 text-blue-400"
-                          }`}
-                        >
-                          {market.analysis.under.signal}
-                        </Badge>
-                      </div>
-                      <div className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                        {market.analysis.under.percentage}%
-                      </div>
-                    </div>
-
-                    <div
-                      className={`p-2 rounded border ${
-                        market.analysis.over.signal === "TRADE NOW"
-                          ? "bg-emerald-500/20 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
-                          : theme === "dark"
-                            ? "bg-gray-800/50 border-gray-700"
-                            : "bg-gray-100 border-gray-300"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                          Over (5-9)
-                        </span>
-                        <Badge
-                          className={`text-xs ${
-                            market.analysis.over.signal === "TRADE NOW"
-                              ? "bg-emerald-500 text-white animate-pulse"
-                              : "bg-blue-500/20 text-blue-400"
-                          }`}
-                        >
-                          {market.analysis.over.signal}
-                        </Badge>
-                      </div>
-                      <div className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                        {market.analysis.over.percentage}%
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Even/Odd Analysis */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div
-                      className={`p-2 rounded border ${
-                        market.analysis.even.signal === "TRADE NOW"
-                          ? "bg-emerald-500/20 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
-                          : theme === "dark"
-                            ? "bg-gray-800/50 border-gray-700"
-                            : "bg-gray-100 border-gray-300"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Even</span>
-                        <Badge
-                          className={`text-xs ${
-                            market.analysis.even.signal === "TRADE NOW"
-                              ? "bg-emerald-500 text-white animate-pulse"
-                              : "bg-blue-500/20 text-blue-400"
-                          }`}
-                        >
-                          {market.analysis.even.signal}
-                        </Badge>
-                      </div>
-                      <div className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                        {market.analysis.even.percentage}%
-                      </div>
-                    </div>
-
-                    <div
-                      className={`p-2 rounded border ${
-                        market.analysis.odd.signal === "TRADE NOW"
-                          ? "bg-emerald-500/20 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
-                          : theme === "dark"
-                            ? "bg-gray-800/50 border-gray-700"
-                            : "bg-gray-100 border-gray-300"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Odd</span>
-                        <Badge
-                          className={`text-xs ${
-                            market.analysis.odd.signal === "TRADE NOW"
-                              ? "bg-emerald-500 text-white animate-pulse"
-                              : "bg-blue-500/20 text-blue-400"
-                          }`}
-                        >
-                          {market.analysis.odd.signal}
-                        </Badge>
-                      </div>
-                      <div className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                        {market.analysis.odd.percentage}%
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Differs Analysis */}
-                  <div
-                    className={`p-2 rounded border ${
-                      market.analysis.differs.signal === "TRADE NOW"
-                        ? "bg-emerald-500/20 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
-                        : theme === "dark"
-                          ? "bg-gray-800/50 border-gray-700"
-                          : "bg-gray-100 border-gray-300"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                        Differs ({market.analysis.differs.digit})
-                      </span>
-                      <Badge
-                        className={`text-xs ${
-                          market.analysis.differs.signal === "TRADE NOW"
-                            ? "bg-emerald-500 text-white animate-pulse"
-                            : "bg-blue-500/20 text-blue-400"
-                        }`}
-                      >
-                        {market.analysis.differs.signal}
-                      </Badge>
-                    </div>
-                    <div className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                      {market.analysis.differs.percentage.toFixed(1)}%
-                    </div>
-                  </div>
-                </div>
-              )}
             </Card>
           )
         })}
       </div>
 
-      <Dialog open={showSignalPopup} onOpenChange={setShowSignalPopup}>
-        <DialogContent
-          className={`max-w-md ${
-            theme === "dark"
-              ? "bg-gradient-to-br from-emerald-900/90 to-green-900/90 border-emerald-500/50 shadow-[0_0_50px_rgba(16,185,129,0.6)]"
-              : "bg-gradient-to-br from-emerald-50 to-green-50 border-emerald-300"
-          } animate-pulse`}
-        >
-          <DialogHeader>
-            <DialogTitle
-              className={`text-2xl font-bold flex items-center gap-2 ${theme === "dark" ? "text-emerald-400" : "text-emerald-600"}`}
-            >
-              <Zap className="h-6 w-6" />
-              TRADE NOW!
-            </DialogTitle>
-          </DialogHeader>
-          {tradeSignal && (
-            <div className="space-y-4">
-              <div
-                className={`p-4 rounded-lg border ${theme === "dark" ? "bg-gray-900/50 border-emerald-500/30" : "bg-white border-emerald-300"}`}
+      {showSignalPopup && tradeSignals.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="max-w-4xl w-full max-h-[90vh] overflow-y-auto space-y-4">
+            <div className="flex justify-end mb-2">
+              <Button
+                onClick={() => {
+                  setShowSignalPopup(false)
+                  setTradeSignals([])
+                }}
+                variant="outline"
+                size="sm"
+                className="bg-red-500/20 hover:bg-red-500/30 border-red-500/50 text-white"
               >
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Market:</span>
-                    <div className={`font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                      {tradeSignal.market}
-                    </div>
-                  </div>
-                  <div>
-                    <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Trade Type:</span>
-                    <div className={`font-bold ${theme === "dark" ? "text-emerald-400" : "text-emerald-600"}`}>
-                      {tradeSignal.tradeType}
-                    </div>
-                  </div>
-                  <div>
-                    <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Entry Point:</span>
-                    <div className={`font-bold ${theme === "dark" ? "text-cyan-400" : "text-cyan-600"}`}>
-                      {tradeSignal.entryPoint}
-                    </div>
-                  </div>
-                  <div>
-                    <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Validity:</span>
-                    <div className={`font-bold ${theme === "dark" ? "text-orange-400" : "text-orange-600"}`}>
-                      {tradeSignal.validity}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                className={`p-4 rounded-lg border ${theme === "dark" ? "bg-emerald-500/10 border-emerald-500/30" : "bg-emerald-100 border-emerald-300"}`}
-              >
-                <div className={`text-sm font-bold mb-2 ${theme === "dark" ? "text-emerald-400" : "text-emerald-600"}`}>
-                  Trade Conditions:
-                </div>
-                <ul className="space-y-1">
-                  {tradeSignal.conditions.map((condition, idx) => (
-                    <li key={idx} className={`text-sm ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}>
-                      • {condition}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>Confidence:</span>
-                  <div className={`text-2xl font-bold ${theme === "dark" ? "text-emerald-400" : "text-emerald-600"}`}>
-                    {tradeSignal.confidence}%
-                  </div>
-                </div>
-                <Button
-                  onClick={() => setShowSignalPopup(false)}
-                  className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold"
-                >
-                  <Target className="h-4 w-4 mr-2" />
-                  Got It!
-                </Button>
-              </div>
+                <X className="h-4 w-4 mr-2" />
+                Close All Signals
+              </Button>
             </div>
-          )}
-        </DialogContent>
-      </Dialog>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {tradeSignals.map((signal, idx) => {
+                const bgColors = {
+                  "even-odd":
+                    theme === "dark"
+                      ? "from-green-900/90 to-emerald-900/90 border-green-500/50 shadow-[0_0_30px_rgba(34,197,94,0.5)]"
+                      : "from-green-50 to-emerald-50 border-green-400",
+                  "over-under":
+                    theme === "dark"
+                      ? "from-blue-900/90 to-cyan-900/90 border-blue-500/50 shadow-[0_0_30px_rgba(59,130,246,0.5)]"
+                      : "from-blue-50 to-cyan-50 border-blue-400",
+                  differs:
+                    theme === "dark"
+                      ? "from-purple-900/90 to-violet-900/90 border-purple-500/50 shadow-[0_0_30px_rgba(168,85,247,0.5)]"
+                      : "from-purple-50 to-violet-50 border-purple-400",
+                }
+
+                const textColors = {
+                  "even-odd": theme === "dark" ? "text-green-400" : "text-green-600",
+                  "over-under": theme === "dark" ? "text-blue-400" : "text-blue-600",
+                  differs: theme === "dark" ? "text-purple-400" : "text-purple-600",
+                }
+
+                return (
+                  <div
+                    key={idx}
+                    className={`bg-gradient-to-br ${bgColors[signal.category]} border-2 rounded-xl p-6 animate-pulse relative`}
+                  >
+                    <Button
+                      onClick={() => {
+                        setTradeSignals((prev) => prev.filter((_, i) => i !== idx))
+                        if (tradeSignals.length <= 1) {
+                          setShowSignalPopup(false)
+                        }
+                      }}
+                      variant="ghost"
+                      size="icon"
+                      className="absolute top-2 right-2 h-6 w-6 hover:bg-white/10"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+
+                    <div className={`text-2xl font-bold flex items-center gap-2 mb-4 ${textColors[signal.category]}`}>
+                      <Zap className="h-6 w-6" />
+                      TRADE NOW!
+                    </div>
+
+                    <div
+                      className={`p-4 rounded-lg border mb-4 ${theme === "dark" ? "bg-gray-900/50 border-white/10" : "bg-white border-gray-200"}`}
+                    >
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Market:</span>
+                          <div className={`font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                            {signal.market}
+                          </div>
+                        </div>
+                        <div>
+                          <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Trade Type:</span>
+                          <div className={`font-bold ${textColors[signal.category]}`}>{signal.tradeType}</div>
+                        </div>
+                        <div>
+                          <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Entry Point:</span>
+                          <div className={`font-bold ${theme === "dark" ? "text-cyan-400" : "text-cyan-600"}`}>
+                            {signal.entryPoint}
+                          </div>
+                        </div>
+                        <div>
+                          <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>Validity:</span>
+                          <div className={`font-bold ${theme === "dark" ? "text-orange-400" : "text-orange-600"}`}>
+                            {signal.validity}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`p-4 rounded-lg border mb-4 ${theme === "dark" ? `${signal.category === "even-odd" ? "bg-green-500/10 border-green-500/30" : signal.category === "over-under" ? "bg-blue-500/10 border-blue-500/30" : "bg-purple-500/10 border-purple-500/30"}` : `${signal.category === "even-odd" ? "bg-green-100 border-green-300" : signal.category === "over-under" ? "bg-blue-100 border-blue-300" : "bg-purple-100 border-purple-300"}`}`}
+                    >
+                      <div className={`text-sm font-bold mb-2 ${textColors[signal.category]}`}>Trade Conditions:</div>
+                      <ul className="space-y-1">
+                        {signal.conditions.map((condition, condIdx) => (
+                          <li
+                            key={condIdx}
+                            className={`text-sm ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}
+                          >
+                            • {condition}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                          Confidence:
+                        </span>
+                        <div className={`text-2xl font-bold ${textColors[signal.category]}`}>{signal.confidence}%</div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
