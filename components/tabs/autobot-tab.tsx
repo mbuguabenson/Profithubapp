@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -12,10 +12,33 @@ import { Play, Square, AlertCircle, AlertTriangle, Activity } from "lucide-react
 import { useDerivAPI } from "@/lib/deriv-api-context"
 import { useDerivAuth } from "@/hooks/use-deriv-auth"
 import { AutoBot, type BotStrategy, type AutoBotState, type AutoBotConfig } from "@/lib/autobots"
+import { TickHistoryManager } from "@/lib/tick-history-manager"
 
 interface AutoBotTabProps {
   theme?: "light" | "dark"
   symbol: string
+}
+
+interface BotConfig {
+  initialStake: number
+  tpPercent: number
+  slPercent: number
+  useMartingale: boolean
+  martingaleMultiplier: number
+  duration: number
+}
+
+interface TradeLogEntry {
+  id: string
+  time: Date
+  strategy: string
+  contract: string
+  predicted: string
+  entry: string
+  exit: string
+  stake: number
+  result: "win" | "loss"
+  profitLoss: number
 }
 
 const BOT_STRATEGIES: {
@@ -28,13 +51,13 @@ const BOT_STRATEGIES: {
     id: "EVEN_ODD",
     name: "EVEN/ODD Bot",
     description: "Analyzes Even/Odd digit bias over last 50 ticks",
-    condition: "Entry: When even/odd reaches 56%+ and increasing. Wait at 50-56%. Exit after 5 ticks.",
+    condition: "Entry: When even/odd reaches 56%+ and increasing. Wait at 50-56%. Exit after 1 tick.",
   },
   {
     id: "OVER3_UNDER6",
     name: "OVER3/UNDER6 Bot",
     description: "Trades Over 3 (4-9) vs Under 6 (0-5)",
-    condition: "Entry: 60%+ = STRONG signal. 56-60% = TRADE NOW. 53-56% = WAIT. Exit after 5 ticks.",
+    condition: "Entry: 60%+ = STRONG signal. 56-60% = TRADE NOW. 53-56% = WAIT. Exit after 1 tick.",
   },
   {
     id: "OVER2_UNDER7",
@@ -46,7 +69,7 @@ const BOT_STRATEGIES: {
     id: "OVER1_UNDER8",
     name: "OVER1/UNDER8 Bot",
     description: "Advanced Over 1 (2-9) vs Under 8 (0-7)",
-    condition: "Entry: Analyzes last 25 ticks. 60%+ threshold. Exit after 5 ticks.",
+    condition: "Entry: Analyzes last 25 ticks. 60%+ threshold. Exit after 1 tick.",
   },
   {
     id: "UNDER6",
@@ -70,69 +93,95 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
   const [botStates, setBotStates] = useState<Map<BotStrategy, AutoBotState>>(new Map())
   const [botAnalysis, setBotAnalysis] = useState<Map<BotStrategy, any>>(new Map())
   const [botReadyStatus, setBotReadyStatus] = useState<Map<BotStrategy, boolean>>(new Map())
+  const [botConfigs, setBotConfigs] = useState<Map<BotStrategy, BotConfig>>(new Map())
+  const [botTickData, setBotTickData] = useState<Map<BotStrategy, number[]>>(new Map())
+  const [tradeLogs, setTradeLogs] = useState<TradeLogEntry[]>([])
 
-  const [config, setConfig] = useState<AutoBotConfig>({
-    symbol: symbol,
-    historyCount: 1000,
-    duration: 5,
-    durationUnit: "t",
-    tpPercent: 10,
-    slPercent: 50,
-    useMartingale: false,
-    martingaleMultiplier: 2,
-    cooldownMs: 300,
-    maxTradesPerMinute: 120,
-    initialStake: 0.35,
-    balance: accountInfo?.balance || 1000,
-  })
+  const tickManagerRef = useRef<TickHistoryManager | null>(null)
 
   useEffect(() => {
-    setConfig((prev) => ({ ...prev, symbol: symbol }))
-  }, [symbol])
-
-  useEffect(() => {
-    if (accountInfo?.balance) {
-      setConfig((prev) => ({ ...prev, balance: accountInfo.balance }))
+    const defaultConfig: BotConfig = {
+      initialStake: 0.35,
+      tpPercent: 10,
+      slPercent: 50,
+      useMartingale: false,
+      martingaleMultiplier: 2,
+      duration: 1, // Default to 1 tick
     }
-  }, [accountInfo])
+
+    const configs = new Map<BotStrategy, BotConfig>()
+    BOT_STRATEGIES.forEach((strategy) => {
+      configs.set(strategy.id, { ...defaultConfig })
+    })
+    setBotConfigs(configs)
+  }, [])
 
   useEffect(() => {
     if (!apiClient || !isConnected) return
 
+    const initTickData = async () => {
+      if (!tickManagerRef.current) {
+        tickManagerRef.current = new TickHistoryManager(apiClient)
+      }
+
+      // Load history sequentially for the single market (all bots use same market)
+      await tickManagerRef.current.loadTickHistorySequentially([symbol], 50)
+
+      // Subscribe to live updates
+      await tickManagerRef.current.subscribeToMarkets([symbol])
+    }
+
+    initTickData()
+
     const analyzeInterval = setInterval(async () => {
+      if (!tickManagerRef.current) return
+
+      const latestDigits = tickManagerRef.current.getTickBuffer(symbol)
+
+      if (latestDigits.length < 25) return
+
       for (const strategy of BOT_STRATEGIES) {
         try {
-          // Fetch tick history for analysis (e.g., last 50 ticks)
-          const response = await apiClient.getTickHistory(symbol, 50)
-          const latestDigits = response.prices.map((price: number) => {
-            const priceStr = price.toFixed(5)
-            return Number.parseInt(priceStr[priceStr.length - 1])
-          })
+          setBotTickData((prev) => new Map(prev).set(strategy.id, latestDigits))
 
           const analysis = analyzeStrategy(strategy.id, latestDigits)
           setBotAnalysis((prev) => new Map(prev).set(strategy.id, analysis))
 
-          // Check if conditions are met for READY status
-          // This is a simplified example, adjust conditions based on bot strategy
           const isReady = analysis.marketPower >= 56 && analysis.trend === "increasing"
           setBotReadyStatus((prev) => new Map(prev).set(strategy.id, isReady))
         } catch (error) {
           console.error(`[v0] Analysis error for ${strategy.id}:`, error)
         }
       }
-    }, 2000) // Update every 2 seconds
+    }, 2000)
 
-    return () => clearInterval(analyzeInterval)
+    return () => {
+      clearInterval(analyzeInterval)
+      if (tickManagerRef.current) {
+        tickManagerRef.current.cleanup()
+      }
+    }
   }, [apiClient, isConnected, symbol])
 
   const analyzeStrategy = (strategy: BotStrategy, digits: number[]) => {
     if (digits.length < 25) {
-      // Ensure enough data for meaningful analysis
-      return { marketPower: 0, trend: "neutral", signal: "WAIT", entryPoint: null, exitPoint: null }
+      return {
+        marketPower: 0,
+        trend: "neutral",
+        signal: "WAIT",
+        entryPoint: null,
+        exitPoint: null,
+        powerDistribution: {},
+      }
     }
 
-    const last10 = digits.slice(-10) // For trend analysis
-    const last50 = digits // For overall distribution
+    const last10 = digits.slice(-10)
+    const last50 = digits
+
+    const digitFrequency: Record<number, number> = {}
+    for (let i = 0; i <= 9; i++) {
+      digitFrequency[i] = last50.filter((d) => d === i).length
+    }
 
     switch (strategy) {
       case "EVEN_ODD": {
@@ -141,7 +190,6 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
         const oddPercent = 100 - evenPercent
         const maxPercent = Math.max(evenPercent, oddPercent)
 
-        // Trend analysis based on last 10 digits' evenness compared to overall
         const evenLast10 = last10.filter((d) => d % 2 === 0).length
         const evenPercentLast10 = (evenLast10 / 10) * 100
         const trend = evenPercentLast10 > evenPercent ? "increasing" : "decreasing"
@@ -151,86 +199,89 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
           trend,
           signal: maxPercent >= 56 && trend === "increasing" ? "TRADE NOW" : maxPercent >= 50 ? "WAIT" : "NEUTRAL",
           entryPoint: evenPercent > oddPercent ? "EVEN" : "ODD",
-          exitPoint: "After 5 ticks",
+          exitPoint: "After 1 tick",
           distribution: { even: evenPercent.toFixed(1), odd: oddPercent.toFixed(1) },
+          powerDistribution: digitFrequency,
         }
       }
 
       case "OVER3_UNDER6": {
-        const overCount = last50.filter((d) => d >= 4).length // Digits 4, 5, 6, 7, 8, 9
-        const underCount = last50.filter((d) => d <= 5).length // Digits 0, 1, 2, 3, 4, 5
+        const overCount = last50.filter((d) => d >= 4).length
+        const underCount = last50.filter((d) => d <= 5).length
         const overPercent = (overCount / last50.length) * 100
         const underPercent = (underCount / last50.length) * 100
         const maxPercent = Math.max(overPercent, underPercent)
 
         return {
           marketPower: maxPercent,
-          trend: maxPercent >= 60 ? "strong" : maxPercent >= 56 ? "increasing" : "neutral", // Simplified trend
+          trend: maxPercent >= 60 ? "strong" : maxPercent >= 56 ? "increasing" : "neutral",
           signal: maxPercent >= 60 ? "STRONG" : maxPercent >= 56 ? "TRADE NOW" : maxPercent >= 53 ? "WAIT" : "NEUTRAL",
           entryPoint: overPercent > underPercent ? "OVER 3" : "UNDER 6",
-          exitPoint: "After 5 ticks",
+          exitPoint: "After 1 tick",
           distribution: { over: overPercent.toFixed(1), under: underPercent.toFixed(1) },
+          powerDistribution: digitFrequency,
         }
       }
 
       case "OVER2_UNDER7": {
-        const overCount = last50.filter((d) => d >= 3).length // Digits 3, 4, 5, 6, 7, 8, 9
-        const underCount = last50.filter((d) => d <= 6).length // Digits 0, 1, 2, 3, 4, 5, 6
+        const overCount = last50.filter((d) => d >= 3).length
+        const underCount = last50.filter((d) => d <= 6).length
         const overPercent = (overCount / last50.length) * 100
         const underPercent = (underCount / last50.length) * 100
         const maxPercent = Math.max(overPercent, underPercent)
 
         return {
           marketPower: maxPercent,
-          trend: maxPercent >= 60 ? "strong" : "neutral", // Simplified trend
+          trend: maxPercent >= 60 ? "strong" : "neutral",
           signal: maxPercent >= 60 ? "TRADE NOW" : maxPercent >= 56 ? "WAIT" : "NEUTRAL",
           entryPoint: overPercent > underPercent ? "OVER 2" : "UNDER 7",
-          exitPoint: "After 5 ticks",
+          exitPoint: "After 1 tick",
           distribution: { over: overPercent.toFixed(1), under: underPercent.toFixed(1) },
+          powerDistribution: digitFrequency,
         }
       }
 
       case "OVER1_UNDER8": {
-        const overCount = last50.filter((d) => d >= 2).length // Digits 2-9
-        const underCount = last50.filter((d) => d <= 7).length // Digits 0-7
+        const overCount = last50.filter((d) => d >= 2).length
+        const underCount = last50.filter((d) => d <= 7).length
         const overPercent = (overCount / last50.length) * 100
         const underPercent = (underCount / last50.length) * 100
         const maxPercent = Math.max(overPercent, underPercent)
 
         return {
           marketPower: maxPercent,
-          trend: maxPercent >= 60 ? "strong" : "neutral", // Simplified trend
+          trend: maxPercent >= 60 ? "strong" : "neutral",
           signal: maxPercent >= 60 ? "TRADE NOW" : "NEUTRAL",
           entryPoint: overPercent > underPercent ? "OVER 1" : "UNDER 8",
-          exitPoint: "After 5 ticks",
+          exitPoint: "After 1 tick",
           distribution: { over: overPercent.toFixed(1), under: underPercent.toFixed(1) },
+          powerDistribution: digitFrequency,
         }
       }
 
       case "UNDER6": {
-        const under4Count = last50.filter((d) => d <= 4).length // Digits 0, 1, 2, 3, 4
+        const under4Count = last50.filter((d) => d <= 4).length
         const under4Percent = (under4Count / last50.length) * 100
 
         return {
           marketPower: under4Percent,
-          trend: under4Percent >= 50 ? "strong" : "neutral", // Simplified trend
+          trend: under4Percent >= 50 ? "strong" : "neutral",
           signal: under4Percent >= 50 ? "TRADE NOW" : "WAIT",
           entryPoint: "UNDER 6",
-          exitPoint: "After 5 ticks",
+          exitPoint: "After 1 tick",
           distribution: { under4: under4Percent.toFixed(1) },
+          powerDistribution: digitFrequency,
         }
       }
 
       case "DIFFERS": {
-        // Count frequency of digits 2 through 7
         const frequency: Record<number, number> = {}
         for (let i = 2; i <= 7; i++) {
           frequency[i] = last50.filter((d) => d === i).length
         }
 
-        // Find the digit with the lowest frequency
         let lowestDigit = 2
-        let lowestCount = last50.length // Initialize with a value higher than any possible count
+        let lowestCount = last50.length
 
         for (let i = 2; i <= 7; i++) {
           if (frequency[i] < lowestCount) {
@@ -241,19 +292,26 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
 
         const lowestPercent = (lowestCount / last50.length) * 100
 
-        // Strategy condition: <10% power (meaning the digit appears less than 10% of the time)
         return {
-          marketPower: 100 - lowestPercent, // Higher marketPower means less frequent digit is more dominant
-          trend: lowestPercent < 10 ? "strong" : "neutral", // 'strong' implies the condition for trading is met
+          marketPower: 100 - lowestPercent,
+          trend: lowestPercent < 10 ? "strong" : "neutral",
           signal: lowestPercent < 10 ? "TRADE NOW" : "WAIT",
           entryPoint: `DIFFERS ${lowestDigit}`,
-          exitPoint: "After 5 ticks",
-          distribution: { lowestDigit, frequency: lowestPercent.toFixed(1) }, // Store info about the lowest digit
+          exitPoint: "After 1 tick",
+          distribution: { lowestDigit, frequency: lowestPercent.toFixed(1) },
+          powerDistribution: digitFrequency,
         }
       }
 
       default:
-        return { marketPower: 0, trend: "neutral", signal: "WAIT", entryPoint: null, exitPoint: null }
+        return {
+          marketPower: 0,
+          trend: "neutral",
+          signal: "WAIT",
+          entryPoint: null,
+          exitPoint: null,
+          powerDistribution: digitFrequency,
+        }
     }
   }
 
@@ -266,31 +324,61 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
         return
       }
 
-      // Validate and prepare config
-      if (config.initialStake <= 0) {
+      const botConfig = botConfigs.get(strategy)
+      if (!botConfig) return
+
+      if (botConfig.initialStake <= 0) {
         console.error("[v0] Initial stake must be greater than 0")
         return
       }
-      if (config.initialStake > config.balance) {
+      if (botConfig.initialStake > (accountInfo?.balance || 0)) {
         console.error("[v0] Initial stake cannot exceed account balance")
         return
       }
 
-      const validatedStake = Math.round(config.initialStake * 100) / 100
-      const validatedConfig = { ...config, initialStake: validatedStake }
+      const validatedStake = Math.round(botConfig.initialStake * 100) / 100
+      const autoBotConfig: AutoBotConfig = {
+        symbol: symbol,
+        historyCount: 1000,
+        duration: botConfig.duration,
+        durationUnit: "t",
+        tpPercent: botConfig.tpPercent,
+        slPercent: botConfig.slPercent,
+        useMartingale: botConfig.useMartingale,
+        martingaleMultiplier: botConfig.martingaleMultiplier,
+        cooldownMs: 300,
+        maxTradesPerMinute: 120,
+        initialStake: validatedStake,
+        balance: accountInfo?.balance || 1000,
+      }
 
-      console.log(`[v0] Starting ${strategy} bot with config:`, validatedConfig)
+      console.log(`[v0] Starting ${strategy} bot with config:`, autoBotConfig)
 
-      const newBot = new AutoBot(apiClient, strategy, validatedConfig)
+      const newBot = new AutoBot(apiClient, strategy, autoBotConfig)
 
       await newBot.start((state) => {
         setBotStates((prev) => new Map(prev).set(strategy, state))
+
+        if (state.lastTrade) {
+          const logEntry: TradeLogEntry = {
+            id: `${strategy}-${Date.now()}`,
+            time: new Date(),
+            strategy: BOT_STRATEGIES.find((s) => s.id === strategy)?.name || strategy,
+            contract: state.lastTrade.contractType || "N/A",
+            predicted: state.lastTrade.prediction || "N/A",
+            entry: state.lastTrade.entrySpot?.toString() || "N/A",
+            exit: state.lastTrade.exitSpot?.toString() || "N/A",
+            stake: state.lastTrade.stake || 0,
+            result: state.lastTrade.isWin ? "win" : "loss",
+            profitLoss: state.lastTrade.profit || 0,
+          }
+          setTradeLogs((prev) => [logEntry, ...prev.slice(0, 99)])
+        }
       })
 
       setActiveBots((prev) => new Map(prev).set(strategy, newBot))
     } catch (error: any) {
       console.error(`[v0] Error starting ${strategy} bot:`, error)
-      // Optionally display error to user
     }
   }
 
@@ -312,7 +400,6 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
     }
   }
 
-  // Emergency Stop for ALL bots
   const handleEmergencyStopAll = () => {
     console.log("[v0] EMERGENCY STOP ACTIVATED for all bots")
     activeBots.forEach((bot, strategy) => {
@@ -321,6 +408,22 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
     })
     setActiveBots(new Map())
     setBotStates(new Map())
+  }
+
+  const updateBotConfig = (strategy: BotStrategy, updates: Partial<BotConfig>) => {
+    setBotConfigs((prev) => {
+      const newConfigs = new Map(prev)
+      const currentConfig = newConfigs.get(strategy) || {
+        initialStake: 0.35,
+        tpPercent: 10,
+        slPercent: 50,
+        useMartingale: false,
+        martingaleMultiplier: 2,
+        duration: 1,
+      }
+      newConfigs.set(strategy, { ...currentConfig, ...updates })
+      return newConfigs
+    })
   }
 
   return (
@@ -361,63 +464,6 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
         </CardContent>
       </Card>
 
-      {/* Bot Configuration */}
-      <Card
-        className={
-          theme === "dark"
-            ? "bg-gradient-to-br from-[#0f1629]/80 to-[#1a2235]/80 border-blue-500/20"
-            : "bg-white border-gray-200"
-        }
-      >
-        <CardHeader>
-          <CardTitle className={theme === "dark" ? "text-white" : "text-gray-900"}>Global Configuration</CardTitle>
-          <CardDescription className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
-            Applied to all bots
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label className={theme === "dark" ? "text-white" : "text-gray-900"}>Initial Stake ($)</Label>
-              <Input
-                type="number"
-                value={config.initialStake}
-                onChange={(e) => setConfig({ ...config, initialStake: Number.parseFloat(e.target.value) })}
-                className={theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className={theme === "dark" ? "text-white" : "text-gray-900"}>Take Profit (%)</Label>
-              <Input
-                type="number"
-                value={config.tpPercent}
-                onChange={(e) => setConfig({ ...config, tpPercent: Number.parseFloat(e.target.value) })}
-                className={theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className={theme === "dark" ? "text-white" : "text-gray-900"}>Stop Loss (%)</Label>
-              <Input
-                type="number"
-                value={config.slPercent}
-                onChange={(e) => setConfig({ ...config, slPercent: Number.parseFloat(e.target.value) })}
-                className={theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={config.useMartingale}
-              onCheckedChange={(checked) => setConfig({ ...config, useMartingale: checked })}
-            />
-            <Label className={theme === "dark" ? "text-white" : "text-gray-900"}>Enable Martingale</Label>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Emergency Stop Button for ALL bots */}
       {activeBots.size > 0 && (
         <Card className={theme === "dark" ? "bg-orange-500/10 border-orange-500/30" : "bg-orange-50 border-orange-200"}>
@@ -445,12 +491,21 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
         </Card>
       )}
 
+      {/* Bot Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {BOT_STRATEGIES.map((strategy) => {
           const analysis = botAnalysis.get(strategy.id)
           const isReady = botReadyStatus.get(strategy.id) || false
           const botState = botStates.get(strategy.id)
           const isRunning = activeBots.has(strategy.id)
+          const botConfig = botConfigs.get(strategy.id) || {
+            initialStake: 0.35,
+            tpPercent: 10,
+            slPercent: 50,
+            useMartingale: false,
+            martingaleMultiplier: 2,
+            duration: 1,
+          }
 
           return (
             <Card
@@ -506,9 +561,34 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                       />
                     </div>
 
+                    {/* Power Distribution */}
+                    {analysis.powerDistribution && (
+                      <div
+                        className={`p-3 rounded-lg ${theme === "dark" ? "bg-purple-500/10 border border-purple-500/30" : "bg-purple-50 border border-purple-200"}`}
+                      >
+                        <div
+                          className={`text-xs font-semibold mb-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}
+                        >
+                          Power Distribution
+                        </div>
+                        <div className="grid grid-cols-5 gap-1">
+                          {Object.entries(analysis.powerDistribution).map(([digit, count]) => (
+                            <div key={digit} className="text-center">
+                              <div className={`text-xs ${theme === "dark" ? "text-gray-500" : "text-gray-600"}`}>
+                                {digit}
+                              </div>
+                              <div className={`text-xs font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                                {count}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Statistical Analysis */}
                     <div
-                      className={`p-3 rounded-lg ${theme === "dark" ? "bg-purple-500/10 border border-purple-500/30" : "bg-purple-50 border border-purple-200"}`}
+                      className={`p-3 rounded-lg ${theme === "dark" ? "bg-cyan-500/10 border border-cyan-500/30" : "bg-cyan-50 border border-cyan-200"}`}
                     >
                       <div
                         className={`text-xs font-semibold mb-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}
@@ -556,12 +636,50 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
                   </>
                 )}
 
-                {/* Condition Details */}
-                <div
-                  className={`p-2 rounded text-xs ${theme === "dark" ? "bg-gray-800/50 text-gray-400" : "bg-gray-50 text-gray-600"}`}
-                >
-                  {strategy.condition}
-                </div>
+                {/* Bot Configuration - Each bot has its own */}
+                {!isRunning && (
+                  <div className="space-y-2 pt-2 border-t border-gray-700">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                          Stake ($)
+                        </Label>
+                        <Input
+                          type="number"
+                          value={botConfig.initialStake}
+                          onChange={(e) =>
+                            updateBotConfig(strategy.id, { initialStake: Number.parseFloat(e.target.value) })
+                          }
+                          className={`h-8 text-xs ${theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}`}
+                          step="0.01"
+                          min="0.01"
+                        />
+                      </div>
+                      <div>
+                        <Label className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                          Ticks
+                        </Label>
+                        <Input
+                          type="number"
+                          value={botConfig.duration}
+                          onChange={(e) => updateBotConfig(strategy.id, { duration: Number.parseInt(e.target.value) })}
+                          className={`h-8 text-xs ${theme === "dark" ? "bg-gray-800 border-gray-700 text-white" : ""}`}
+                          min="1"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={botConfig.useMartingale}
+                        onCheckedChange={(checked) => updateBotConfig(strategy.id, { useMartingale: checked })}
+                        className="scale-75"
+                      />
+                      <Label className={`text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                        Martingale
+                      </Label>
+                    </div>
+                  </div>
+                )}
 
                 {/* Bot Stats if running */}
                 {botState && (
@@ -622,6 +740,104 @@ export function AutoBotTab({ theme = "dark", symbol }: AutoBotTabProps) {
           )
         })}
       </div>
+
+      {/* Trade Log */}
+      {tradeLogs.length > 0 && (
+        <Card
+          className={`border ${
+            theme === "dark"
+              ? "bg-gradient-to-br from-[#0f1629]/80 to-[#1a2235]/80 border-purple-500/20"
+              : "bg-white border-gray-200"
+          }`}
+        >
+          <CardHeader>
+            <CardTitle className={theme === "dark" ? "text-white" : "text-gray-900"}>Trade Log</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr
+                    className={`border-b ${theme === "dark" ? "border-gray-700 text-gray-400" : "border-gray-200 text-gray-600"}`}
+                  >
+                    <th className="text-left py-3 px-2 text-xs font-medium">Time</th>
+                    <th className="text-left py-3 px-2 text-xs font-medium">Strategy</th>
+                    <th className="text-left py-3 px-2 text-xs font-medium">Contract</th>
+                    <th className="text-left py-3 px-2 text-xs font-medium">Predicted</th>
+                    <th className="text-left py-3 px-2 text-xs font-medium">Entry</th>
+                    <th className="text-left py-3 px-2 text-xs font-medium">Exit</th>
+                    <th className="text-left py-3 px-2 text-xs font-medium">Stake</th>
+                    <th className="text-left py-3 px-2 text-xs font-medium">Result</th>
+                    <th className="text-right py-3 px-2 text-xs font-medium">P/L</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tradeLogs.map((trade) => (
+                    <tr
+                      key={trade.id}
+                      className={`border-b ${theme === "dark" ? "border-gray-800 hover:bg-gray-800/30" : "border-gray-100 hover:bg-gray-50"}`}
+                    >
+                      <td className={`py-3 px-2 text-xs ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}>
+                        {trade.time.toLocaleTimeString()}
+                      </td>
+                      <td className={`py-3 px-2 text-xs ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}>
+                        {trade.strategy}
+                      </td>
+                      <td className={`py-3 px-2 text-xs ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}>
+                        {trade.contract}
+                      </td>
+                      <td className={`py-3 px-2 text-xs ${theme === "dark" ? "text-blue-400" : "text-blue-600"}`}>
+                        {trade.predicted}
+                      </td>
+                      <td
+                        className={`py-3 px-2 text-xs font-mono ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}
+                      >
+                        {trade.entry}
+                      </td>
+                      <td
+                        className={`py-3 px-2 text-xs font-mono ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}
+                      >
+                        {trade.exit}
+                      </td>
+                      <td className={`py-3 px-2 text-xs ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}>
+                        ${trade.stake.toFixed(2)}
+                      </td>
+                      <td className="py-3 px-2">
+                        <Badge
+                          className={`text-xs ${
+                            trade.result === "win"
+                              ? theme === "dark"
+                                ? "bg-green-500/20 text-green-400 border-green-500/30"
+                                : "bg-green-100 text-green-700 border-green-200"
+                              : theme === "dark"
+                                ? "bg-red-500/20 text-red-400 border-red-500/30"
+                                : "bg-red-100 text-red-700 border-red-200"
+                          }`}
+                        >
+                          {trade.result.toUpperCase()}
+                        </Badge>
+                      </td>
+                      <td
+                        className={`py-3 px-2 text-xs font-bold text-right ${
+                          trade.profitLoss >= 0
+                            ? theme === "dark"
+                              ? "text-green-400"
+                              : "text-green-600"
+                            : theme === "dark"
+                              ? "text-red-400"
+                              : "text-red-600"
+                        }`}
+                      >
+                        {trade.profitLoss >= 0 ? "+" : ""}${trade.profitLoss.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

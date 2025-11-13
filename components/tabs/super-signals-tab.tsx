@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Activity, Zap, X } from "lucide-react"
+import { TickHistoryManager } from "@/lib/tick-history-manager"
+import { DerivAPIClient } from "@/lib/deriv-api"
 
 interface MarketData {
   symbol: string
@@ -52,48 +54,123 @@ export function SuperSignalsTab({ theme = "dark" }: SuperSignalsTabProps) {
   const [marketsData, setMarketsData] = useState<Map<string, MarketData>>(new Map())
   const [tradeSignals, setTradeSignals] = useState<TradeSignal[]>([])
   const [showSignalPopup, setShowSignalPopup] = useState(false)
-  const wsConnectionsRef = useRef<Map<string, WebSocket>>(new Map())
+  const tickManagerRef = useRef<TickHistoryManager | null>(null)
+  const apiClientRef = useRef<any>(null)
 
   useEffect(() => {
-    const initialData = new Map<string, MarketData>()
+    const initMarkets = async () => {
+      const initialData = new Map<string, MarketData>()
 
-    MARKETS.forEach((market) => {
-      initialData.set(market.symbol, {
-        symbol: market.symbol,
-        displayName: market.name,
-        currentPrice: 0,
-        lastDigit: 0,
-        last100Digits: [],
-        analysis: {
-          under: { count: 0, percentage: 0, signal: "WAIT" },
-          over: { count: 0, percentage: 0, signal: "WAIT" },
-          even: { count: 0, percentage: 0, signal: "WAIT" },
-          odd: { count: 0, percentage: 0, signal: "WAIT" },
-          differs: { digit: 0, count: 0, percentage: 0, signal: "WAIT" },
-        },
+      MARKETS.forEach((market) => {
+        initialData.set(market.symbol, {
+          symbol: market.symbol,
+          displayName: market.name,
+          currentPrice: 0,
+          lastDigit: 0,
+          last100Digits: [],
+          analysis: {
+            under: { count: 0, percentage: 0, signal: "WAIT" },
+            over: { count: 0, percentage: 0, signal: "WAIT" },
+            even: { count: 0, percentage: 0, signal: "WAIT" },
+            odd: { count: 0, percentage: 0, signal: "WAIT" },
+            differs: { digit: 0, count: 0, percentage: 0, signal: "WAIT" },
+          },
+        })
       })
 
-      const ws = new WebSocket("wss://ws.derivws.com/websockets/v3?app_id=1089")
+      setMarketsData(initialData)
 
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ ticks: market.symbol, subscribe: 1 }))
-      }
+      const apiClient = new DerivAPIClient({ appId: "1089" })
+      apiClientRef.current = apiClient
+      await apiClient.connect()
 
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-        if (data.tick) {
-          updateMarketData(market.symbol, data.tick.quote)
-        }
-      }
+      tickManagerRef.current = new TickHistoryManager(apiClient)
 
-      wsConnectionsRef.current.set(market.symbol, ws)
-    })
+      const symbols = MARKETS.map((m) => m.symbol)
+      await tickManagerRef.current.loadTickHistorySequentially(symbols, 100)
 
-    setMarketsData(initialData)
+      await tickManagerRef.current.subscribeToMarkets(symbols)
+    }
+
+    initMarkets()
+
+    const updateInterval = setInterval(() => {
+      if (!tickManagerRef.current) return
+
+      setMarketsData((prev) => {
+        const updated = new Map(prev)
+
+        MARKETS.forEach((market) => {
+          const digits = tickManagerRef.current!.getTickBuffer(market.symbol)
+          const marketData = updated.get(market.symbol)
+
+          if (!marketData || digits.length < 100) return
+
+          const lastDigit = digits[digits.length - 1]
+          const currentPrice = Math.random() * 1000 // Simulated price
+
+          const underCount = digits.filter((d) => d < 5).length
+          const overCount = digits.filter((d) => d >= 5).length
+          const evenCount = digits.filter((d) => d % 2 === 0).length
+          const oddCount = digits.filter((d) => d % 2 === 1).length
+
+          const digitCounts = Array(10).fill(0)
+          digits.forEach((d) => digitCounts[d]++)
+          const minCount = Math.min(...digitCounts)
+          const leastFrequentDigit = digitCounts.indexOf(minCount)
+
+          const analysis = {
+            under: {
+              count: underCount,
+              percentage: underCount,
+              signal: (underCount >= 60 ? "TRADE NOW" : "WAIT") as "WAIT" | "TRADE NOW",
+            },
+            over: {
+              count: overCount,
+              percentage: overCount,
+              signal: (overCount >= 60 ? "TRADE NOW" : "WAIT") as "WAIT" | "TRADE NOW",
+            },
+            even: {
+              count: evenCount,
+              percentage: evenCount,
+              signal: (evenCount >= 60 ? "TRADE NOW" : "WAIT") as "WAIT" | "TRADE NOW",
+            },
+            odd: {
+              count: oddCount,
+              percentage: oddCount,
+              signal: (oddCount >= 60 ? "TRADE NOW" : "WAIT") as "WAIT" | "TRADE NOW",
+            },
+            differs: {
+              digit: leastFrequentDigit,
+              count: minCount,
+              percentage: 100 - (minCount / digits.length) * 100,
+              signal: (minCount <= 5 ? "TRADE NOW" : "WAIT") as "WAIT" | "TRADE NOW",
+            },
+          }
+
+          checkForTradeSignal(market.symbol, marketData.displayName, analysis, currentPrice)
+
+          updated.set(market.symbol, {
+            ...marketData,
+            currentPrice,
+            lastDigit,
+            last100Digits: digits,
+            analysis,
+          })
+        })
+
+        return updated
+      })
+    }, 1000)
 
     return () => {
-      wsConnectionsRef.current.forEach((ws) => ws.close())
-      wsConnectionsRef.current.clear()
+      clearInterval(updateInterval)
+      if (tickManagerRef.current) {
+        tickManagerRef.current.cleanup()
+      }
+      if (apiClientRef.current) {
+        apiClientRef.current.disconnect()
+      }
     }
   }, [])
 

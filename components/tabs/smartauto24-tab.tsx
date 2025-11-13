@@ -65,7 +65,7 @@ export function SmartAuto24Tab({ theme }: { theme: "light" | "dark" }) {
     Differs: 2.3,
   })
 
-  const [ticksPerTrade, setTicksPerTrade] = useState<number>(5)
+  const [ticksPerTrade, setTicksPerTrade] = useState<number>(1)
 
   // Trading state
   const [isRunning, setIsRunning] = useState(false)
